@@ -1,11 +1,12 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
-  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck,
+  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound,
 } from 'lucide-react'
-import { C, initials, nameOf, avColorByIndex } from '../lib/utils'
+import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword } from '../lib/utils'
 import { inp, Field } from '../components/ui'
 import {
   addTeacher, addAssistant, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
+  fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent,
 } from '../lib/api'
 
 export default function Manage({ dict, subjects, onBack, onChanged }) {
@@ -13,13 +14,16 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
   const [showArchived, setShowArchived] = useState(false)
   const [modal, setModal] = useState(null) // { kind, row? }
   const [invite, setInvite] = useState(null) // строка преподавателя для выдачи доступа
+  const [linkTeacher, setLinkTeacher] = useState(null) // преподаватель для привязки групп/предметов
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   const tabs = [
     { k: 'teachers', t: 'Преподаватели', icon: GraduationCap },
     { k: 'assistants', t: 'Ассистенты', icon: UserCheck },
+    { k: 'students', t: 'Ученики', icon: UsersRound },
     { k: 'groups', t: 'Группы', icon: Users },
+    { k: 'subjects', t: 'Предметы', icon: BookOpen },
   ]
 
   const rows = (dict[tab] || []).filter((r) => showArchived ? true : !r.archived)
@@ -30,13 +34,16 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
       if (modal.row) {
         const patch = tab === 'groups'
           ? { name: form.name }
-          : tab === 'teachers'
-            ? { full_name: form.full_name, subject_id: form.subject_id || null, phone: form.phone }
-            : { full_name: form.full_name, phone: form.phone }
+          : tab === 'subjects'
+            ? { name: form.name }
+            : tab === 'teachers'
+              ? { full_name: form.full_name, subject_id: form.subject_id || null, phone: form.phone }
+              : { full_name: form.full_name, phone: form.phone }
         await updateRow(tab, modal.row.id, patch)
       } else {
         if (tab === 'teachers') await addTeacher({ full_name: form.full_name, subject_id: form.subject_id || null, phone: form.phone })
         else if (tab === 'assistants') await addAssistant({ full_name: form.full_name, phone: form.phone })
+        else if (tab === 'subjects') await addSubject(form.name)
         else await addGroup({ name: form.name })
       }
       setModal(null)
@@ -72,16 +79,18 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Управление</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты и группы центра</p>
         </div>
-        <button onClick={() => setModal({ kind: 'new' })} className="rowflex"
-          style={{ marginLeft: 'auto', gap: 7, padding: '10px 17px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-          <Plus size={17} /> Добавить
-        </button>
+        {tab !== 'students' && (
+          <button onClick={() => setModal({ kind: 'new' })} className="rowflex"
+            style={{ marginLeft: 'auto', gap: 7, padding: '10px 17px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            <Plus size={17} /> Добавить
+          </button>
+        )}
       </div>
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 11, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
       <div className="rowflex" style={{ marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', background: C.grey, borderRadius: 11, padding: 3 }}>
+        <div style={{ display: 'flex', background: C.grey, borderRadius: 11, padding: 3, flexWrap: 'wrap' }}>
           {tabs.map((o) => {
             const a = tab === o.k
             const Icon = o.icon
@@ -90,12 +99,18 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
               <Icon size={15} /> {o.t}</button>
           })}
         </div>
-        <label className="rowflex" style={{ marginLeft: 'auto', gap: 7, fontSize: 13, color: C.slate, cursor: 'pointer' }}>
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-          Показывать архивные
-        </label>
+        {tab !== 'students' && (
+          <label className="rowflex" style={{ marginLeft: 'auto', gap: 7, fontSize: 13, color: C.slate, cursor: 'pointer' }}>
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+            Показывать архивные
+          </label>
+        )}
       </div>
 
+      {tab === 'students' ? (
+        <StudentsManage groups={(dict.groups || []).filter((g) => !g.archived)} />
+      ) : (
+      <>
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
         {rows.length === 0 && (
           <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>Пусто. Нажмите «Добавить».</div>
@@ -104,6 +119,8 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
           <div key={r.id} className="rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none', opacity: r.archived ? 0.5 : 1 }}>
             {tab === 'groups' ? (
               <div style={{ width: 40, height: 40, borderRadius: 11, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}><Users size={19} /></div>
+            ) : tab === 'subjects' ? (
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: '#f3e8ff', color: '#7c3aed', display: 'grid', placeItems: 'center' }}><BookOpen size={19} /></div>
             ) : tab === 'assistants' ? (
               <div style={{ width: 40, height: 40, borderRadius: 11, background: C.tealSoft, color: C.teal, display: 'grid', placeItems: 'center' }}><UserCheck size={19} /></div>
             ) : (
@@ -119,27 +136,37 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
                 )}
               </div>
               <div style={{ fontSize: 12.5, color: C.slate }}>
-                {tab === 'teachers' && (r.subject_id ? nameOf(subjects, r.subject_id) : 'предмет не указан')}
-                {tab === 'teachers' && r.phone ? ` · ${r.phone}` : ''}
+                {tab === 'teachers' && (r.phone || 'преподаватель')}
                 {tab === 'assistants' && (r.phone || 'ассистент')}
                 {tab === 'groups' && (r.archived ? 'в архиве' : 'активна')}
+                {tab === 'subjects' && 'предмет'}
               </div>
             </div>
-            {r.archived
-              ? <button onClick={() => toggleArchive(r)} disabled={busy} className="rowflex" title="Восстановить"
-                  style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.ok, background: C.okSoft, border: 'none', cursor: 'pointer' }}>
-                  <RotateCcw size={14} /> <span className="hide-sm">Вернуть</span></button>
-              : <>
-                  {tab === 'teachers' && !r.profile_id && (
-                    <button onClick={() => setInvite(r)} disabled={busy} className="rowflex" title="Выдать доступ в систему"
-                      style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
-                      <KeyRound size={14} /> <span className="hide-sm">Выдать доступ</span></button>
-                  )}
-                  <button onClick={() => setModal({ kind: 'edit', row: r })} disabled={busy} title="Редактировать"
-                    style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
-                  <button onClick={() => toggleArchive(r)} disabled={busy} title="В архив"
-                    style={{ padding: 8, borderRadius: 9, color: C.warn, background: C.warnSoft, border: 'none', cursor: 'pointer' }}><Archive size={15} /></button>
-                </>}
+            {tab === 'subjects' ? (
+              <button onClick={() => setModal({ kind: 'edit', row: r })} disabled={busy} title="Переименовать"
+                style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
+            ) : r.archived ? (
+              <button onClick={() => toggleArchive(r)} disabled={busy} className="rowflex" title="Восстановить"
+                style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.ok, background: C.okSoft, border: 'none', cursor: 'pointer' }}>
+                <RotateCcw size={14} /> <span className="hide-sm">Вернуть</span></button>
+            ) : (
+              <>
+                {tab === 'teachers' && (
+                  <button onClick={() => setLinkTeacher(r)} disabled={busy} className="rowflex" title="Группы и предметы"
+                    style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: '#7c3aed', background: '#f3e8ff', border: 'none', cursor: 'pointer' }}>
+                    <Link2 size={14} /> <span className="hide-sm">Группы/предметы</span></button>
+                )}
+                {tab === 'teachers' && !r.profile_id && (
+                  <button onClick={() => setInvite(r)} disabled={busy} className="rowflex" title="Выдать доступ в систему"
+                    style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
+                    <KeyRound size={14} /> <span className="hide-sm">Доступ</span></button>
+                )}
+                <button onClick={() => setModal({ kind: 'edit', row: r })} disabled={busy} title="Редактировать"
+                  style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
+                <button onClick={() => toggleArchive(r)} disabled={busy} title="В архив"
+                  style={{ padding: 8, borderRadius: 9, color: C.warn, background: C.warnSoft, border: 'none', cursor: 'pointer' }}><Archive size={15} /></button>
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -148,6 +175,8 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
         Архивирование не удаляет записи и не влияет на прошлые уроки — архивные просто
         не показываются при создании новых уроков. Это безопасно для истории и отчётов.
       </p>
+      </>
+      )}
 
       {modal && (
         <EditModal
@@ -167,29 +196,32 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
           onDone={async () => { setInvite(null); await onChanged() }}
         />
       )}
+
+      {linkTeacher && (
+        <LinkModal
+          teacher={linkTeacher}
+          groups={(dict.groups || []).filter((g) => !g.archived)}
+          subjects={dict.subjects || []}
+          onClose={() => setLinkTeacher(null)}
+          onDone={() => setLinkTeacher(null)}
+        />
+      )}
     </>
   )
 }
 
 function InviteModal({ teacher, onClose, onDone }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [login, setLogin] = useState(loginFromName(teacher.full_name))
+  const [password, setPassword] = useState(genPassword())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const valid = email.trim() && password.length >= 6
-
-  function genPassword() {
-    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
-    let p = ''
-    for (let i = 0; i < 10; i++) p += chars[Math.floor(Math.random() * chars.length)]
-    setPassword(p)
-  }
+  const valid = login.trim() && password.length >= 6
 
   async function submit() {
     setBusy(true); setErr('')
     try {
       await inviteTeacher({
-        email: email.trim(),
+        login: login.trim().toLowerCase(),
         password,
         teacher_id: teacher.id,
         full_name: teacher.full_name,
@@ -210,26 +242,26 @@ function InviteModal({ teacher, onClose, onDone }) {
           <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
         </div>
         <p style={{ fontSize: 13.5, color: C.slate, margin: '0 0 18px' }}>
-          Создаём аккаунт входа для <b style={{ color: C.ink }}>{teacher.full_name}</b>. После этого преподаватель сможет входить в систему и вести свой журнал.
+          Создаём вход для <b style={{ color: C.ink }}>{teacher.full_name}</b>. Логин предложен автоматически из ФИО — можно поменять.
         </p>
 
-        <Field label="Email для входа">
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teacher@lider.kz" style={inp} autoFocus />
+        <Field label="Логин для входа">
+          <input value={login} onChange={(e) => setLogin(e.target.value.toLowerCase())} placeholder="asaparova" style={inp} autoFocus />
         </Field>
-        <Field label="Пароль (минимум 6 символов)">
+        <Field label="Пароль">
           <div style={{ display: 'flex', gap: 8 }}>
-            <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Придумайте или сгенерируйте" style={{ ...inp, flex: 1 }} />
-            <button onClick={genPassword} type="button" title="Сгенерировать"
+            <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Пароль" style={{ ...inp, flex: 1 }} />
+            <button onClick={() => setPassword(genPassword())} type="button" title="Сгенерировать"
               style={{ padding: '0 14px', borderRadius: 11, background: C.grey, color: C.brand, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              Сгенерировать
+              Новый
             </button>
           </div>
         </Field>
 
-        {password && (
+        {login && password && (
           <div style={{ background: C.brandSoft, borderRadius: 11, padding: 12, fontSize: 13, color: C.ink, marginBottom: 4 }}>
-            Передайте преподавателю: <b>{email || 'email'}</b> / <b>{password}</b>
-            <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>Запишите пароль — после закрытия он не сохранится в открытом виде.</div>
+            Передайте преподавателю — логин: <b>{login}</b> · пароль: <b>{password}</b>
+            <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>Запишите эти данные — после закрытия пароль не восстановить.</div>
           </div>
         )}
 
@@ -246,18 +278,19 @@ function InviteModal({ teacher, onClose, onDone }) {
 
 function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
   const isGroup = tab === 'groups'
+  const isSubject = tab === 'subjects'
   const isTeacher = tab === 'teachers'
+  const nameField = isGroup || isSubject
   const [form, setForm] = useState({
     full_name: row?.full_name || '',
     name: row?.name || '',
-    subject_id: row?.subject_id || '',
     phone: row?.phone || '',
   })
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }))
-  const valid = isGroup ? form.name.trim() : form.full_name.trim()
+  const valid = nameField ? form.name.trim() : form.full_name.trim()
 
   const title = row ? 'Редактировать' : 'Добавить'
-  const label = isGroup ? 'группу' : tab === 'assistants' ? 'ассистента' : 'преподавателя'
+  const label = isGroup ? 'группу' : isSubject ? 'предмет' : tab === 'assistants' ? 'ассистента' : 'преподавателя'
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 50 }}>
@@ -269,23 +302,230 @@ function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
 
         {isGroup ? (
           <Field label="Название группы"><input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. ЕНТ-11Б" style={inp} autoFocus /></Field>
+        ) : isSubject ? (
+          <Field label="Название предмета"><input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. Математика" style={inp} autoFocus /></Field>
         ) : (
           <>
             <Field label="ФИО"><input value={form.full_name} onChange={(e) => set('full_name', e.target.value)} placeholder="Фамилия Имя" style={inp} autoFocus /></Field>
-            {isTeacher && (
-              <Field label="Предмет">
-                <select value={form.subject_id} onChange={(e) => set('subject_id', e.target.value)} style={inp}>
-                  <option value="">— не указан —</option>
-                  {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </Field>
-            )}
             <Field label="Телефон (необязательно)"><input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+7 ___ ___ __ __" style={inp} /></Field>
+            {isTeacher && !row && (
+              <p style={{ fontSize: 12, color: C.faint, marginTop: -4, marginBottom: 8 }}>Группы и предметы назначите после создания — кнопкой «Группы/предметы».</p>
+            )}
           </>
         )}
 
         <button disabled={!valid || busy} onClick={() => onSave(form)} className="rowflex"
           style={{ width: '100%', justifyContent: 'center', marginTop: 6, padding: 12, gap: 7, background: valid && !busy ? C.brand : C.line, color: valid && !busy ? '#fff' : C.slate, borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: valid && !busy ? 'pointer' : 'default' }}>
+          <Check size={17} /> {busy ? 'Сохранение…' : 'Сохранить'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Модалка привязки групп и предметов к преподавателю (множественный выбор)
+function LinkModal({ teacher, groups, subjects, onClose, onDone }) {
+  const [groupIds, setGroupIds] = useState([])
+  const [subjectIds, setSubjectIds] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    fetchTeacherLinks(teacher.id)
+      .then(({ groupIds, subjectIds }) => { setGroupIds(groupIds); setSubjectIds(subjectIds) })
+      .catch((e) => setErr(e.message))
+      .finally(() => setLoading(false))
+  }, [teacher.id])
+
+  const toggle = (arr, setArr, id) =>
+    setArr(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
+
+  async function save() {
+    setBusy(true); setErr('')
+    try {
+      await saveTeacherLinks(teacher.id, groupIds, subjectIds)
+      onDone()
+    } catch (e) {
+      setErr(e.message || 'Не удалось сохранить'); setBusy(false)
+    }
+  }
+
+  const Chip = ({ active, onClick, children }) => (
+    <button onClick={onClick} style={{
+      padding: '8px 13px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+      border: active ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+      background: active ? C.brandSoft : '#fff', color: active ? C.brand : C.slate,
+    }}>{children}</button>
+  )
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 50 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 480, padding: 24, maxHeight: '90vh', overflow: 'auto' }}>
+        <div className="rowflex" style={{ marginBottom: 6 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Группы и предметы</h3>
+          <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
+        </div>
+        <p style={{ fontSize: 13.5, color: C.slate, margin: '0 0 18px' }}>
+          Отметьте, какие группы ведёт <b style={{ color: C.ink }}>{teacher.full_name}</b> и по каким предметам.
+          При создании урока преподаватель будет выбирать только из отмеченного.
+        </p>
+
+        {loading ? (
+          <div style={{ padding: 30, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.faint, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 9 }}>Группы</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+              {groups.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>Сначала создайте группы во вкладке «Группы».</span>}
+              {groups.map((g) => (
+                <Chip key={g.id} active={groupIds.includes(g.id)} onClick={() => toggle(groupIds, setGroupIds, g.id)}>{g.name}</Chip>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.faint, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 9 }}>Предметы</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              {subjects.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>Сначала создайте предметы во вкладке «Предметы».</span>}
+              {subjects.map((s) => (
+                <Chip key={s.id} active={subjectIds.includes(s.id)} onClick={() => toggle(subjectIds, setSubjectIds, s.id)}>{s.name}</Chip>
+              ))}
+            </div>
+
+            {err && <div style={{ color: '#c2360b', fontSize: 13, margin: '10px 0' }}>{err}</div>}
+
+            <button disabled={busy} onClick={save} className="rowflex"
+              style={{ width: '100%', justifyContent: 'center', marginTop: 16, padding: 12, gap: 7, background: busy ? C.line : C.brand, color: busy ? C.slate : '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: busy ? 'default' : 'pointer' }}>
+              <Check size={17} /> {busy ? 'Сохранение…' : 'Сохранить привязки'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------- РАЗДЕЛ УЧЕНИКОВ ----------
+function StudentsManage({ groups }) {
+  const [students, setStudents] = useState(null)
+  const [modal, setModal] = useState(null) // { row } | 'new'
+  const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
+
+  async function reload() {
+    try { setStudents(await fetchStudentsWithGroups()) }
+    catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { reload() }, [])
+
+  const filtered = (students || []).filter((s) => {
+    const t = q.toLowerCase().trim()
+    return !t || s.full_name.toLowerCase().includes(t)
+  })
+
+  const groupName = (id) => groups.find((g) => g.id === id)?.name
+
+  return (
+    <>
+      <div className="rowflex" style={{ marginBottom: 12, gap: 10 }}>
+        <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 340 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика…"
+            style={{ width: '100%', padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13, outline: 'none', background: C.card }} />
+        </div>
+        <button onClick={() => setModal('new')} className="rowflex"
+          style={{ marginLeft: 'auto', gap: 7, padding: '10px 17px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+          <Plus size={17} /> Добавить ученика
+        </button>
+      </div>
+
+      {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 11, marginBottom: 14, fontSize: 13 }}>{err}</div>}
+
+      {students === null ? (
+        <div style={{ padding: 30, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+      ) : (
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>
+              {students.length === 0 ? 'Учеников пока нет. Нажмите «Добавить ученика».' : 'Ничего не найдено.'}
+            </div>
+          )}
+          {filtered.map((s, i) => (
+            <div key={s.id} className="rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: avColorByIndex(i), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 14 }}>{initials(s.full_name)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14.5 }}>{s.full_name}</div>
+                <div style={{ fontSize: 12.5, color: C.slate }}>
+                  {s.groupIds.length ? s.groupIds.map(groupName).filter(Boolean).join(', ') : 'без группы'}
+                  {s.contact ? ` · ${s.contact}` : ''}
+                </div>
+              </div>
+              <button onClick={() => setModal({ row: s })} title="Редактировать"
+                style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modal && (
+        <StudentModal
+          groups={groups}
+          row={modal === 'new' ? null : modal.row}
+          onClose={() => setModal(null)}
+          onDone={async () => { setModal(null); await reload() }}
+        />
+      )}
+    </>
+  )
+}
+
+function StudentModal({ groups, row, onClose, onDone }) {
+  const [name, setName] = useState(row?.full_name || '')
+  const [contact, setContact] = useState(row?.contact || '')
+  const [groupIds, setGroupIds] = useState(row?.groupIds || [])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const valid = name.trim()
+
+  const toggle = (id) => setGroupIds((a) => a.includes(id) ? a.filter((x) => x !== id) : [...a, id])
+
+  async function save() {
+    setBusy(true); setErr('')
+    try {
+      if (row) await updateStudent(row.id, name.trim(), contact, groupIds)
+      else await addStudent(name.trim(), contact, groupIds)
+      onDone()
+    } catch (e) { setErr(e.message || 'Не удалось сохранить'); setBusy(false) }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 50 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 460, padding: 24, maxHeight: '90vh', overflow: 'auto' }}>
+        <div className="rowflex" style={{ marginBottom: 18 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{row ? 'Редактировать ученика' : 'Новый ученик'}</h3>
+          <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
+        </div>
+
+        <Field label="ФИО ученика"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Фамилия Имя" style={inp} autoFocus /></Field>
+        <Field label="Телефон / родитель (необязательно)"><input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="+7 ___ ___ __ __" style={inp} /></Field>
+
+        <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 8 }}>Группы</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {groups.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>Сначала создайте группы во вкладке «Группы».</span>}
+          {groups.map((g) => {
+            const active = groupIds.includes(g.id)
+            return (
+              <button key={g.id} onClick={() => toggle(g.id)} style={{
+                padding: '8px 13px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                border: active ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                background: active ? C.brandSoft : '#fff', color: active ? C.brand : C.slate,
+              }}>{g.name}</button>
+            )
+          })}
+        </div>
+
+        {err && <div style={{ color: '#c2360b', fontSize: 13, margin: '8px 0' }}>{err}</div>}
+
+        <button disabled={!valid || busy} onClick={save} className="rowflex"
+          style={{ width: '100%', justifyContent: 'center', marginTop: 8, padding: 12, gap: 7, background: valid && !busy ? C.brand : C.line, color: valid && !busy ? '#fff' : C.slate, borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: valid && !busy ? 'pointer' : 'default' }}>
           <Check size={17} /> {busy ? 'Сохранение…' : 'Сохранить'}
         </button>
       </div>

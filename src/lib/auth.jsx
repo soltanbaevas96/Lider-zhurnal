@@ -35,7 +35,18 @@ export function AuthProvider({ children }) {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  const signIn = (email, password) => supabase.auth.signInWithPassword({ email, password })
+  // Вход по логину: логин -> технический email через функцию email_for_login -> авторизация.
+  // Если передан email (содержит @) — используем как есть (для админа-завуча).
+  const signIn = async (loginOrEmail, password) => {
+    let email = loginOrEmail.trim()
+    if (!email.includes('@')) {
+      const { data, error } = await supabase.rpc('email_for_login', { p_login: email.toLowerCase() })
+      if (error) return { error: { message: 'Ошибка входа' } }
+      if (!data) return { error: { message: 'Неверный логин или пароль' } }
+      email = data
+    }
+    return supabase.auth.signInWithPassword({ email, password })
+  }
   const signOut = () => supabase.auth.signOut()
 
   const isAdmin = profile?.role === 'admin'

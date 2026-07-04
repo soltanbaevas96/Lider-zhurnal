@@ -1,14 +1,15 @@
 import React, { useMemo, useState } from 'react'
 import {
   Clock, CheckCircle2, FileText, AlertTriangle, Users, Search, ChevronRight,
-  Download, ArrowLeft, UserCheck,
+  Download, ArrowLeft, UserCheck, ClipboardCheck,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { C, hoursBetween, nameOf, initials, avColorByIndex } from '../lib/utils'
+import { C, hoursBetween, nameOf, initials, avColorByIndex, periodRange } from '../lib/utils'
 import { Stat, MiniStat } from '../components/ui'
 import PeriodPicker from '../components/PeriodPicker'
 import LessonTable from '../components/LessonTable'
 import LessonForm from '../components/LessonForm'
+import AttendancePanel from './AttendancePanel'
 
 export default function AdminCabinet({ dict, lessons, period, setPeriod, periodLabel, onLessonChanged, onLessonDeleted }) {
   const [tab, setTab] = useState('teachers')
@@ -111,7 +112,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
 
       <div className="rowflex" style={{ marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', background: C.grey, borderRadius: 11, padding: 3 }}>
-          {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'assistants', t: 'Ассистенты' }].map((o) => {
+          {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'assistants', t: 'Ассистенты' }, { k: 'attendance', t: 'Посещаемость' }].map((o) => {
             const a = tab === o.k
             return <button key={o.k} onClick={() => setTab(o.k)}
               style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: a ? C.card : 'transparent', color: a ? C.brand : C.slate, boxShadow: a ? '0 1px 4px rgba(20,24,58,.1)' : 'none', border: 'none', cursor: 'pointer' }}>{o.t}</button>
@@ -152,6 +153,8 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
             </button>
           ))}
         </div>
+      ) : tab === 'attendance' ? (
+        <AttendancePanel dict={dict} periodRange={periodRange(period)} periodLabel={periodLabel} />
       ) : (
         <div className="tgrid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
           {assistantStats.map((a) => (

@@ -2,7 +2,8 @@ import React, { useState } from 'react'
 import { X, Paperclip, Trash2 } from 'lucide-react'
 import { C } from '../lib/utils'
 import { inp, Field } from './ui'
-import { createLesson, updateLesson, deleteLesson, uploadPlan } from '../lib/api'
+import { createLesson, updateLesson, deleteLesson, uploadPlan, saveAttendance } from '../lib/api'
+import AttendancePicker from './AttendancePicker'
 
 // Режимы: без lesson — создание; с lesson — редактирование.
 // teacherId нужен для создания (чей урок).
@@ -20,6 +21,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
     status: lesson?.status || 'проведён',
   })
   const [file, setFile] = useState(null)
+  const [attendance, setAttendance] = useState([]) // [{ student_id, present }]
   const [saving, setSaving] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [err, setErr] = useState('')
@@ -42,13 +44,17 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
         status: f.status,
         plan_path,
       }
+      let saved
       if (editing) {
-        const updated = await updateLesson(lesson.id, payload)
-        onSaved(updated)
+        saved = await updateLesson(lesson.id, payload)
       } else {
-        const created = await createLesson({ ...payload, teacher_id: teacherId })
-        onSaved(created)
+        saved = await createLesson({ ...payload, teacher_id: teacherId })
       }
+      // Сохраняем посещаемость (для проведённого урока)
+      if (f.status === 'проведён' && attendance.length) {
+        try { await saveAttendance(saved.id, attendance) } catch (e) { /* не блокируем урок */ }
+      }
+      onSaved(saved)
     } catch (e) {
       setErr(e.message || 'Не удалось сохранить урок')
     } finally {
@@ -92,13 +98,22 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
           <Field label="Конец"><input type="time" value={f.end_time} onChange={(e) => set('end_time', e.target.value)} style={inp} /></Field>
         </div>
         <Field label="Тема урока"><input value={f.topic} onChange={(e) => set('topic', e.target.value)} placeholder="Напр. Квадратные уравнения" style={inp} /></Field>
-        <Field label="Учеников на уроке"><input type="number" min="0" value={f.students} onChange={(e) => set('students', e.target.value)} style={inp} /></Field>
         <Field label="Статус">
           <select value={f.status} onChange={(e) => set('status', e.target.value)} style={inp}>
             <option value="проведён">Проведён</option>
             <option value="отменён">Отменён</option>
           </select>
         </Field>
+
+        {f.status === 'проведён' && (
+          <Field label="Посещаемость">
+            <AttendancePicker
+              groupId={f.group_id}
+              lessonId={editing ? lesson.id : null}
+              onChange={(recs) => { setAttendance(recs); set('students', recs.filter((r) => r.present).length) }}
+            />
+          </Field>
+        )}
         <Field label="План урока">
           <label className="rowflex" style={{ gap: 8, padding: '10px 12px', border: `1px dashed ${C.line}`, borderRadius: 11, fontSize: 13, color: C.slate, cursor: 'pointer' }}>
             <Paperclip size={15} /> {file?.name || (lesson?.plan_path ? 'Заменить файл плана' : 'Прикрепить файл (pdf, docx)')}

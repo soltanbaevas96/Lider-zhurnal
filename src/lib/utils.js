@@ -13,6 +13,32 @@ export const initials = (n) => (n || '').split(' ').map((w) => w[0]).join('').sl
 export const nameOf = (arr, id) => arr.find((x) => x.id === id)?.full_name
   ?? arr.find((x) => x.id === id)?.name ?? '—'
 
+// ---------- ТРАНСЛИТ И ЛОГИНЫ ----------
+const TRANSLIT = {
+  а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'i',к:'k',л:'l',м:'m',
+  н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'c',ч:'ch',ш:'sh',щ:'sch',
+  ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',
+  ә:'a',ғ:'g',қ:'k',ң:'n',ө:'o',ұ:'u',ү:'u',һ:'h',і:'i',
+}
+export function translit(s) {
+  return (s || '').toLowerCase().split('').map((ch) => TRANSLIT[ch] ?? ch).join('')
+    .replace(/[^a-z0-9]/g, '')
+}
+// «Сапарова Айгерим» -> первая буква имени + фамилия -> asaparova
+export function loginFromName(fullName) {
+  const parts = (fullName || '').trim().split(/\s+/)
+  if (parts.length === 0) return ''
+  const surname = translit(parts[0])
+  const nameInitial = parts[1] ? translit(parts[1])[0] || '' : ''
+  return (nameInitial + surname) || surname
+}
+export function genPassword(len = 8) {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
+  let p = ''
+  for (let i = 0; i < len; i++) p += chars[Math.floor(Math.random() * chars.length)]
+  return p
+}
+
 // ---------- ПЕРИОДЫ ----------
 // Возвращает список последних N месяцев + «весь период»
 export function monthOptions(count = 6) {

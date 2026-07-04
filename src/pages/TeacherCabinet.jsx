@@ -1,13 +1,29 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Clock, CheckCircle2, FileText, Plus } from 'lucide-react'
 import { C, hoursBetween } from '../lib/utils'
 import { Stat } from '../components/ui'
 import PeriodPicker from '../components/PeriodPicker'
 import LessonTable from '../components/LessonTable'
 import LessonForm from '../components/LessonForm'
+import { fetchMyGroupsAndSubjects } from '../lib/api'
 
 export default function TeacherCabinet({ teacher, dict, lessons, period, setPeriod, onLessonAdded, onLessonChanged, onLessonDeleted }) {
-  const [editing, setEditing] = React.useState(null) // 'new' | lesson | null
+  const [editing, setEditing] = useState(null) // 'new' | lesson | null
+  const [myLinks, setMyLinks] = useState(null) // { groups, subjects } — закреплённые за преподавателем
+
+  useEffect(() => {
+    fetchMyGroupsAndSubjects(teacher.id)
+      .then(setMyLinks)
+      .catch(() => setMyLinks({ groups: [], subjects: [] }))
+  }, [teacher.id])
+
+  // Для формы урока: если у преподавателя есть закреплённые группы — показываем только их,
+  // иначе (пока не настроено) — все группы, чтобы не блокировать работу.
+  const formDict = {
+    ...dict,
+    groups: myLinks?.groups?.length ? myLinks.groups : dict.groups,
+    subjects: myLinks?.subjects?.length ? myLinks.subjects : dict.subjects,
+  }
 
   const own = lessons.filter((l) => l.teacher_id === teacher.id)
   const done = own.filter((l) => l.status === 'проведён')
@@ -41,7 +57,7 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
         <LessonForm
           teacherId={teacher.id}
           lesson={editing === 'new' ? null : editing}
-          dict={dict}
+          dict={formDict}
           onClose={() => setEditing(null)}
           onSaved={(l) => { setEditing(null); editing === 'new' ? onLessonAdded(l) : onLessonChanged(l) }}
           onDeleted={(id) => { setEditing(null); onLessonDeleted(id) }}

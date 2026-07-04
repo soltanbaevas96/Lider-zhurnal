@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { GraduationCap, Video, ClipboardList, LineChart, ShieldCheck, Lock, Mail } from 'lucide-react'
+import { GraduationCap, Video, ClipboardList, LineChart, ShieldCheck, Lock, User } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 
 const L = {
@@ -102,11 +102,11 @@ export default function Login() {
             </div>
           </div>
 
-          <label style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>Email</label>
+          <label style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>Логин</label>
           <div style={{ position: 'relative', marginBottom: 18 }}>
-            <Mail size={17} color="#9aa6c2" style={{ position: 'absolute', left: 15, top: 15 }} />
+            <User size={17} color="#9aa6c2" style={{ position: 'absolute', left: 15, top: 15 }} />
             <input className="lp-field" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@lider.kz" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+              placeholder="например asaparova" onKeyDown={(e) => e.key === 'Enter' && submit()} />
           </div>
 
           <label style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>Пароль</label>
