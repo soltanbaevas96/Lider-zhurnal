@@ -6,7 +6,7 @@ import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword } from 
 import { inp, Field } from '../components/ui'
 import {
   addTeacher, addAssistant, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
-  fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent,
+  fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
 } from '../lib/api'
 
 export default function Manage({ dict, subjects, onBack, onChanged }) {
@@ -15,6 +15,9 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
   const [modal, setModal] = useState(null) // { kind, row? }
   const [invite, setInvite] = useState(null) // строка преподавателя для выдачи доступа
   const [linkTeacher, setLinkTeacher] = useState(null) // преподаватель для привязки групп/предметов
+  const [confirmArch, setConfirmArch] = useState(null) // строка для подтверждения архива/восстановления
+  const [confirmEdit, setConfirmEdit] = useState(null) // строка для подтверждения редактирования
+  const [viewGroup, setViewGroup] = useState(null) // группа для просмотра учеников
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -143,14 +146,19 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
               </div>
             </div>
             {tab === 'subjects' ? (
-              <button onClick={() => setModal({ kind: 'edit', row: r })} disabled={busy} title="Переименовать"
+              <button onClick={() => setConfirmEdit(r)} disabled={busy} title="Переименовать"
                 style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
             ) : r.archived ? (
-              <button onClick={() => toggleArchive(r)} disabled={busy} className="rowflex" title="Восстановить"
+              <button onClick={() => setConfirmArch(r)} disabled={busy} className="rowflex" title="Восстановить"
                 style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.ok, background: C.okSoft, border: 'none', cursor: 'pointer' }}>
                 <RotateCcw size={14} /> <span className="hide-sm">Вернуть</span></button>
             ) : (
               <>
+                {tab === 'groups' && (
+                  <button onClick={() => setViewGroup(r)} disabled={busy} className="rowflex" title="Ученики группы"
+                    style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.teal, background: C.tealSoft, border: 'none', cursor: 'pointer' }}>
+                    <Users size={14} /> <span className="hide-sm">Ученики</span></button>
+                )}
                 {tab === 'teachers' && (
                   <button onClick={() => setLinkTeacher(r)} disabled={busy} className="rowflex" title="Группы и предметы"
                     style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: '#7c3aed', background: '#f3e8ff', border: 'none', cursor: 'pointer' }}>
@@ -161,9 +169,9 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
                     style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
                     <KeyRound size={14} /> <span className="hide-sm">Доступ</span></button>
                 )}
-                <button onClick={() => setModal({ kind: 'edit', row: r })} disabled={busy} title="Редактировать"
+                <button onClick={() => setConfirmEdit(r)} disabled={busy} title="Редактировать"
                   style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
-                <button onClick={() => toggleArchive(r)} disabled={busy} title="В архив"
+                <button onClick={() => setConfirmArch(r)} disabled={busy} title="В архив"
                   style={{ padding: 8, borderRadius: 9, color: C.warn, background: C.warnSoft, border: 'none', cursor: 'pointer' }}><Archive size={15} /></button>
               </>
             )}
@@ -205,6 +213,33 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
           onClose={() => setLinkTeacher(null)}
           onDone={() => setLinkTeacher(null)}
         />
+      )}
+
+      {confirmArch && (
+        <ConfirmModal
+          title={confirmArch.archived ? 'Восстановить из архива?' : 'Отправить в архив?'}
+          message={confirmArch.archived
+            ? `«${confirmArch.full_name || confirmArch.name}» снова станет активным и будет доступен при создании уроков.`
+            : `«${confirmArch.full_name || confirmArch.name}» скроется из списков при создании уроков. История и прошлые уроки сохранятся. Можно вернуть в любой момент.`}
+          confirmText={confirmArch.archived ? 'Восстановить' : 'В архив'}
+          danger={!confirmArch.archived}
+          onCancel={() => setConfirmArch(null)}
+          onConfirm={async () => { const r = confirmArch; setConfirmArch(null); await toggleArchive(r) }}
+        />
+      )}
+
+      {confirmEdit && (
+        <ConfirmModal
+          title="Редактировать запись?"
+          message={`Открыть «${confirmEdit.full_name || confirmEdit.name}» для изменения?`}
+          confirmText="Редактировать"
+          onCancel={() => setConfirmEdit(null)}
+          onConfirm={() => { const r = confirmEdit; setConfirmEdit(null); setModal({ kind: 'edit', row: r }) }}
+        />
+      )}
+
+      {viewGroup && (
+        <GroupStudentsModal group={viewGroup} onClose={() => setViewGroup(null)} />
       )}
     </>
   )
@@ -528,6 +563,73 @@ function StudentModal({ groups, row, onClose, onDone }) {
           style={{ width: '100%', justifyContent: 'center', marginTop: 8, padding: 12, gap: 7, background: valid && !busy ? C.brand : C.line, color: valid && !busy ? '#fff' : C.slate, borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: valid && !busy ? 'pointer' : 'default' }}>
           <Check size={17} /> {busy ? 'Сохранение…' : 'Сохранить'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ ----------
+function ConfirmModal({ title, message, confirmText = 'Подтвердить', danger = false, onCancel, onConfirm }) {
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 60 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 400, padding: 24 }}>
+        <h3 style={{ margin: '0 0 10px', fontSize: 18, fontWeight: 800 }}>{title}</h3>
+        <p style={{ fontSize: 14, color: C.slate, margin: '0 0 20px', lineHeight: 1.5 }}>{message}</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel}
+            style={{ flex: 1, padding: 11, borderRadius: 11, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            Отмена
+          </button>
+          <button onClick={onConfirm}
+            style={{ flex: 1, padding: 11, borderRadius: 11, background: danger ? C.warn : C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            {confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------- УЧЕНИКИ ГРУППЫ ----------
+function GroupStudentsModal({ group, onClose }) {
+  const [students, setStudents] = useState(null)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    fetchStudentsOfGroup(group.id)
+      .then(setStudents)
+      .catch((e) => setErr(e.message))
+  }, [group.id])
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 60 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 440, padding: 24, maxHeight: '85vh', overflow: 'auto' }}>
+        <div className="rowflex" style={{ marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{group.name}</h3>
+          <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
+        </div>
+        {group.note && <p style={{ fontSize: 13, color: C.slate, margin: '0 0 16px' }}>{group.note}</p>}
+
+        {err && <div style={{ color: '#c2360b', fontSize: 13 }}>{err}</div>}
+        {students === null ? (
+          <div style={{ padding: 24, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+        ) : students.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: C.faint, fontSize: 14, background: C.grey, borderRadius: 11 }}>
+            В группе пока нет учеников. Добавьте их в разделе «Ученики» — там у ученика можно отметить эту группу.
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>Всего учеников: {students.length}</div>
+            <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden' }}>
+              {students.map((s, i) => (
+                <div key={s.id} className="rowflex" style={{ gap: 12, padding: '11px 14px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 9, background: avColorByIndex(i), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>{initials(s.full_name)}</div>
+                  <span style={{ fontSize: 14 }}>{s.full_name}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

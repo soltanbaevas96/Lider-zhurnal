@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import {
   Clock, CheckCircle2, FileText, AlertTriangle, Users, Search, ChevronRight,
-  Download, ArrowLeft, UserCheck, ClipboardCheck,
+  Download, ArrowLeft, UserCheck, ClipboardCheck, Plus,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { C, hoursBetween, nameOf, initials, avColorByIndex, periodRange } from '../lib/utils'
@@ -236,6 +236,9 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
             <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: -0.4 }}>{t.full_name}</div>
             <div style={{ fontSize: 13.5, opacity: 0.9, marginTop: 3 }}>{nameOf(dict.subjects, t.subject_id)}{t.phone ? ` · ${t.phone}` : ''}</div>
           </div>
+          <button onClick={() => setEditing('new')} className="rowflex" style={{ gap: 7, padding: '9px 15px', background: '#fff', color: C.brand, borderRadius: 11, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            <Plus size={16} /> Создать урок
+          </button>
           <button onClick={exportOne} className="rowflex" style={{ gap: 7, padding: '9px 15px', background: 'rgba(255,255,255,.2)', color: '#fff', borderRadius: 11, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
             <Download size={16} /> Excel
           </button>
@@ -275,7 +278,8 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
 
       {editing && (
         <LessonForm
-          lesson={editing}
+          teacherId={t.id}
+          lesson={editing === 'new' ? null : editing}
           dict={dict}
           onClose={() => setEditing(null)}
           onSaved={(l) => { setEditing(null); onLessonChanged(l) }}
