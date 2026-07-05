@@ -1,6 +1,6 @@
 import React from 'react'
 import { Users, Clock, Paperclip, UserCheck, Pencil } from 'lucide-react'
-import { C, hoursBetween, fmtDate, nameOf } from '../lib/utils'
+import { C, lessonCount, fmtDate, nameOf } from '../lib/utils'
 import { planUrl } from '../lib/api'
 
 export default function LessonTable({ lessons, dict, showTeacher, onEdit }) {
@@ -12,7 +12,7 @@ export default function LessonTable({ lessons, dict, showTeacher, onEdit }) {
     )
 
   const sorted = [...lessons].sort((a, b) =>
-    (b.lesson_date + b.start_time).localeCompare(a.lesson_date + a.start_time))
+    b.lesson_date.localeCompare(a.lesson_date))
 
   const openPlan = async (path) => {
     const url = await planUrl(path)
@@ -22,14 +22,14 @@ export default function LessonTable({ lessons, dict, showTeacher, onEdit }) {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
       {sorted.map((l, i) => {
-        const h = hoursBetween(l.start_time, l.end_time)
+        const h = lessonCount(l)
         const cancelled = l.status === 'отменён'
         return (
           <div key={l.id} onClick={onEdit ? () => onEdit(l) : undefined}
             className="lrow rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none', opacity: cancelled ? 0.55 : 1, cursor: onEdit ? 'pointer' : 'default' }}>
             <div style={{ textAlign: 'center', minWidth: 44 }}>
               <div style={{ fontSize: 13, fontWeight: 800 }}>{fmtDate(l.lesson_date)}</div>
-              <div style={{ fontSize: 11, color: C.slate }}>{l.start_time?.slice(0, 5)}</div>
+              <div style={{ fontSize: 11, color: C.slate }}>{h} ур.</div>
             </div>
             <div style={{ width: 1, alignSelf: 'stretch', background: C.line }} />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -37,7 +37,7 @@ export default function LessonTable({ lessons, dict, showTeacher, onEdit }) {
               <div className="rowflex" style={{ fontSize: 12, color: C.slate, gap: 10, flexWrap: 'wrap', marginTop: 3 }}>
                 {showTeacher && <span>{nameOf(dict.teachers, l.teacher_id)}</span>}
                 <span className="rowflex" style={{ gap: 3 }}><Users size={12} /> {nameOf(dict.groups, l.group_id)} · {l.students}</span>
-                <span className="rowflex" style={{ gap: 3 }}><Clock size={12} /> {h} ч</span>
+                <span className="rowflex" style={{ gap: 3 }}><Clock size={12} /> {h} {h === 1 ? 'урок' : 'урока'}</span>
                 {l.assistant_id && <span className="rowflex" style={{ gap: 3, color: C.teal }}><UserCheck size={12} /> {nameOf(dict.assistants, l.assistant_id)}</span>}
               </div>
             </div>

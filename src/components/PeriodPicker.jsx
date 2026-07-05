@@ -12,7 +12,11 @@ export default function PeriodPicker({ period, setPeriod }) {
     ? 'Свой период'
     : period.mode === 'all'
       ? 'Весь период'
-      : months.find((m) => m.v === period.month)?.label ?? 'Месяц'
+      : period.mode === 'day'
+        ? 'Сегодня'
+        : period.mode === 'week'
+          ? 'Эта неделя'
+          : months.find((m) => m.v === period.month)?.label ?? 'Месяц'
 
   return (
     <div style={{ position: 'relative' }}>
@@ -27,6 +31,18 @@ export default function PeriodPicker({ period, setPeriod }) {
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 39 }} />
           <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 40, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, boxShadow: '0 14px 40px rgba(20,24,58,.18)', padding: 14, width: 280 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.faint, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Быстрый выбор</div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+              {[{ k: 'day', t: 'Сегодня' }, { k: 'week', t: 'Эта неделя' }].map((o) => {
+                const active = period.mode === o.k
+                return (
+                  <button key={o.k} onClick={() => { setPeriod({ mode: o.k }); setOpen(false) }}
+                    style={{ flex: 1, fontSize: 12.5, fontWeight: 600, padding: '7px 11px', borderRadius: 8, border: 'none', cursor: 'pointer', background: active ? C.brand : C.grey, color: active ? '#fff' : C.slate }}>
+                    {o.t}
+                  </button>
+                )
+              })}
+            </div>
             <div style={{ fontSize: 11, fontWeight: 700, color: C.faint, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>По месяцам</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
               {months.map((m) => {

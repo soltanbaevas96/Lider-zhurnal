@@ -4,6 +4,7 @@ import { C } from '../lib/utils'
 import { inp, Field } from './ui'
 import { createLesson, updateLesson, deleteLesson, uploadPlan, saveAttendance } from '../lib/api'
 import AttendancePicker from './AttendancePicker'
+import GroupSearchSelect from './GroupSearchSelect'
 
 // Режимы: без lesson — создание; с lesson — редактирование.
 // teacherId нужен для создания (чей урок).
@@ -14,8 +15,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
     group_id: lesson?.group_id || dict.groups[0]?.id || '',
     assistant_id: lesson?.assistant_id || '',
     lesson_date: lesson?.lesson_date || today,
-    start_time: (lesson?.start_time || '10:00').slice(0, 5),
-    end_time: (lesson?.end_time || '11:30').slice(0, 5),
+    lessons_count: lesson?.lessons_count || 1,
     topic: lesson?.topic || '',
     students: lesson?.students ?? 8,
     status: lesson?.status || 'проведён',
@@ -26,7 +26,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
   const [confirmDel, setConfirmDel] = useState(false)
   const [err, setErr] = useState('')
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }))
-  const valid = f.topic.trim() && f.end_time > f.start_time && f.group_id
+  const valid = f.topic.trim() && f.group_id
 
   async function save() {
     setSaving(true); setErr('')
@@ -37,8 +37,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
         group_id: f.group_id,
         assistant_id: f.assistant_id || null,
         lesson_date: f.lesson_date,
-        start_time: f.start_time,
-        end_time: f.end_time,
+        lessons_count: Number(f.lessons_count),
         topic: f.topic.trim(),
         students: Number(f.students),
         status: f.status,
@@ -82,9 +81,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
         </div>
 
         <Field label="Группа">
-          <select value={f.group_id} onChange={(e) => set('group_id', e.target.value)} style={inp}>
-            {dict.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+          <GroupSearchSelect groups={dict.groups} value={f.group_id} onChange={(id) => set('group_id', id)} />
         </Field>
         <Field label="Ассистент на уроке">
           <select value={f.assistant_id} onChange={(e) => set('assistant_id', e.target.value)} style={inp}>
@@ -93,10 +90,21 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
           </select>
         </Field>
         <Field label="Дата"><input type="date" value={f.lesson_date} onChange={(e) => set('lesson_date', e.target.value)} style={inp} /></Field>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Field label="Начало"><input type="time" value={f.start_time} onChange={(e) => set('start_time', e.target.value)} style={inp} /></Field>
-          <Field label="Конец"><input type="time" value={f.end_time} onChange={(e) => set('end_time', e.target.value)} style={inp} /></Field>
-        </div>
+        <Field label="Сколько уроков проведено">
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[1, 2, 3].map((n) => {
+              const a = Number(f.lessons_count) === n
+              return (
+                <button key={n} type="button" onClick={() => set('lessons_count', n)}
+                  style={{ flex: 1, padding: '12px 0', borderRadius: 11, fontSize: 15, fontWeight: 800, cursor: 'pointer',
+                    border: a ? `2px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                    background: a ? C.brandSoft : '#fff', color: a ? C.brand : C.slate }}>
+                  {n} {n === 1 ? 'урок' : 'урока'}
+                </button>
+              )
+            })}
+          </div>
+        </Field>
         <Field label="Тема урока"><input value={f.topic} onChange={(e) => set('topic', e.target.value)} placeholder="Напр. Квадратные уравнения" style={inp} /></Field>
         <Field label="Статус">
           <select value={f.status} onChange={(e) => set('status', e.target.value)} style={inp}>

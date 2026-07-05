@@ -4,9 +4,11 @@ import {
 } from 'lucide-react'
 import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, officeOf, langOf, OFFICES } from '../lib/utils'
 import { inp, Field } from '../components/ui'
+import { GroupMultiSelect } from '../components/GroupSearchSelect'
 import {
   addTeacher, addAssistant, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
   fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
+  addStudentToGroup, removeStudentFromGroup, fetchAllStudents,
 } from '../lib/api'
 
 export default function Manage({ dict, subjects, onBack, onChanged }) {
@@ -420,11 +422,8 @@ function LinkModal({ teacher, groups, subjects, onClose, onDone }) {
         ) : (
           <>
             <div style={{ fontSize: 12, fontWeight: 700, color: C.faint, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 9 }}>Группы</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-              {groups.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>Сначала создайте группы во вкладке «Группы».</span>}
-              {groups.map((g) => (
-                <Chip key={g.id} active={groupIds.includes(g.id)} onClick={() => toggle(groupIds, setGroupIds, g.id)}>{g.name}</Chip>
-              ))}
+            <div style={{ marginBottom: 20 }}>
+              <GroupMultiSelect groups={groups} value={groupIds} onChange={setGroupIds} />
             </div>
 
             <div style={{ fontSize: 12, fontWeight: 700, color: C.faint, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 9 }}>Предметы</div>
@@ -556,19 +555,7 @@ function StudentModal({ groups, row, onClose, onDone }) {
         <Field label="Телефон / родитель (необязательно)"><input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="+7 ___ ___ __ __" style={inp} /></Field>
 
         <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 8 }}>Группы</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-          {groups.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>Сначала создайте группы во вкладке «Группы».</span>}
-          {groups.map((g) => {
-            const active = groupIds.includes(g.id)
-            return (
-              <button key={g.id} onClick={() => toggle(g.id)} style={{
-                padding: '8px 13px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                border: active ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
-                background: active ? C.brandSoft : '#fff', color: active ? C.brand : C.slate,
-              }}>{g.name}</button>
-            )
-          })}
-        </div>
+        <GroupMultiSelect groups={groups} value={groupIds} onChange={setGroupIds} />
 
         {err && <div style={{ color: '#c2360b', fontSize: 13, margin: '8px 0' }}>{err}</div>}
 
@@ -606,38 +593,84 @@ function ConfirmModal({ title, message, confirmText = 'Подтвердить', 
 // ---------- УЧЕНИКИ ГРУППЫ ----------
 function GroupStudentsModal({ group, onClose }) {
   const [students, setStudents] = useState(null)
+  const [allStudents, setAllStudents] = useState([])
+  const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => {
-    fetchStudentsOfGroup(group.id)
-      .then(setStudents)
-      .catch((e) => setErr(e.message))
-  }, [group.id])
+  async function reload() {
+    try {
+      const [inGroup, all] = await Promise.all([fetchStudentsOfGroup(group.id), fetchAllStudents()])
+      setStudents(inGroup); setAllStudents(all)
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { reload() }, [group.id])
+
+  const inIds = new Set((students || []).map((s) => s.id))
+  const found = allStudents.filter((s) => {
+    if (inIds.has(s.id)) return false
+    const t = q.toLowerCase().trim()
+    if (!t) return false
+    return s.full_name.toLowerCase().includes(t)
+  }).slice(0, 20)
+
+  async function add(sid) {
+    setBusy(true)
+    try { await addStudentToGroup(sid, group.id); setQ(''); await reload() }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function remove(sid) {
+    setBusy(true)
+    try { await removeStudentFromGroup(sid, group.id); await reload() }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 60 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 440, padding: 24, maxHeight: '85vh', overflow: 'auto' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 460, padding: 24, maxHeight: '88vh', overflow: 'auto' }}>
         <div className="rowflex" style={{ marginBottom: 4 }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{group.name}</h3>
           <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
         </div>
         {group.note && <p style={{ fontSize: 13, color: C.slate, margin: '0 0 16px' }}>{group.note}</p>}
 
-        {err && <div style={{ color: '#c2360b', fontSize: 13 }}>{err}</div>}
+        {err && <div style={{ color: '#c2360b', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+
+        {/* Поиск для добавления */}
+        <div style={{ position: 'relative', marginBottom: 6 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Добавить ученика — начните вводить фамилию…"
+            style={{ width: '100%', padding: '10px 12px', border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13, outline: 'none' }} />
+        </div>
+        {q.trim() && (
+          <div style={{ border: `1px solid ${C.line}`, borderRadius: 11, marginBottom: 14, overflow: 'hidden', maxHeight: 200, overflowY: 'auto' }}>
+            {found.length === 0 && <div style={{ padding: 12, fontSize: 13, color: C.faint, textAlign: 'center' }}>Не найдено (или уже в группе)</div>}
+            {found.map((s) => (
+              <button key={s.id} type="button" disabled={busy} onClick={() => add(s.id)}
+                className="rowflex" style={{ width: '100%', textAlign: 'left', gap: 8, padding: '10px 12px', border: 'none', borderTop: `1px solid ${C.grey}`, background: '#fff', cursor: 'pointer' }}>
+                <Plus size={15} color={C.brand} />
+                <span style={{ fontSize: 14, flex: 1 }}>{s.full_name}</span>
+                <span style={{ fontSize: 11.5, color: C.faint }}>добавить</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {students === null ? (
           <div style={{ padding: 24, textAlign: 'center', color: C.slate }}>Загрузка…</div>
         ) : students.length === 0 ? (
-          <div style={{ padding: 24, textAlign: 'center', color: C.faint, fontSize: 14, background: C.grey, borderRadius: 11 }}>
-            В группе пока нет учеников. Добавьте их в разделе «Ученики» — там у ученика можно отметить эту группу.
+          <div style={{ padding: 20, textAlign: 'center', color: C.faint, fontSize: 14, background: C.grey, borderRadius: 11 }}>
+            В группе пока нет учеников. Найдите их через поиск выше.
           </div>
         ) : (
           <>
-            <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>Всего учеников: {students.length}</div>
+            <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>В группе: {students.length}</div>
             <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden' }}>
               {students.map((s, i) => (
                 <div key={s.id} className="rowflex" style={{ gap: 12, padding: '11px 14px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
                   <div style={{ width: 32, height: 32, borderRadius: 9, background: avColorByIndex(i), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>{initials(s.full_name)}</div>
-                  <span style={{ fontSize: 14 }}>{s.full_name}</span>
+                  <span style={{ fontSize: 14, flex: 1 }}>{s.full_name}</span>
+                  <button disabled={busy} onClick={() => remove(s.id)} title="Убрать из группы"
+                    style={{ border: 'none', background: C.warnSoft, color: C.warn, borderRadius: 8, padding: 6, cursor: 'pointer', display: 'flex' }}><X size={15} /></button>
                 </div>
               ))}
             </div>

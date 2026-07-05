@@ -263,3 +263,22 @@ export async function updateStudent(id, full_name, contact, groupIds) {
       .insert(groupIds.map((group_id) => ({ student_id: id, group_id })))
   }
 }
+
+// Добавить/убрать ученика в группе (по одной связи)
+export async function addStudentToGroup(studentId, groupId) {
+  const { error } = await supabase.from('student_groups')
+    .insert({ student_id: studentId, group_id: groupId })
+  if (error && !/duplicate/i.test(error.message)) throw error
+}
+export async function removeStudentFromGroup(studentId, groupId) {
+  const { error } = await supabase.from('student_groups')
+    .delete().eq('student_id', studentId).eq('group_id', groupId)
+  if (error) throw error
+}
+// Все ученики (для поиска при добавлении в группу)
+export async function fetchAllStudents() {
+  const { data, error } = await supabase.from('students')
+    .select('id, full_name, contact').eq('archived', false).order('full_name')
+  if (error) throw error
+  return data
+}

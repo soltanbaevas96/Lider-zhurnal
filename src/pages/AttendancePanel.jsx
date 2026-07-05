@@ -34,19 +34,30 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
   // Свод по ученикам: сколько отмечено, сколько присутствий
   const byStudent = useMemo(() => {
     if (!data) return []
+    // student -> group -> {total, present}
     const m = {}
     data.rows.forEach((r) => {
-      const s = (m[r.student_id] ||= { total: 0, present: 0 })
-      s.total++
-      if (r.present) s.present++
+      const lesson = data.lessonsById[r.lesson_id]
+      if (!lesson) return
+      const gid = lesson.group_id
+      const s = (m[r.student_id] ||= { total: 0, present: 0, groups: {} })
+      s.total++; if (r.present) s.present++
+      const g = (s.groups[gid] ||= { total: 0, present: 0 })
+      g.total++; if (r.present) g.present++
     })
     return students.map((s) => {
-      const st = m[s.id] || { total: 0, present: 0 }
+      const st = m[s.id]
+      if (!st) return { ...s, total: 0, present: 0, pct: null, groups: [] }
       const pct = st.total ? Math.round((st.present / st.total) * 100) : null
-      return { ...s, total: st.total, present: st.present, pct }
+      const groups = Object.entries(st.groups).map(([gid, v]) => ({
+        name: nameOf(dict.groups, gid),
+        total: v.total, present: v.present,
+        pct: v.total ? Math.round((v.present / v.total) * 100) : null,
+      })).sort((a, b) => (a.pct ?? 100) - (b.pct ?? 100))
+      return { ...s, total: st.total, present: st.present, pct, groups }
     }).filter((s) => s.total > 0)
       .sort((a, b) => (a.pct ?? 100) - (b.pct ?? 100)) // худшие сверху
-  }, [data, students])
+  }, [data, students, dict.groups])
 
   // Свод по группам
   const byGroup = useMemo(() => {
@@ -112,15 +123,33 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
       ) : (
         <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
           {byStudent.map((s, i) => (
-            <div key={s.id} className="rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{s.full_name}</div>
-                <div style={{ fontSize: 12, color: C.slate }}>{s.present} из {s.total} занятий</div>
+            <div key={s.id} style={{ borderTop: i ? `1px solid ${C.line}` : 'none', padding: '13px 16px' }}>
+              <div className="rowflex" style={{ gap: 14 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{s.full_name}</div>
+                  <div style={{ fontSize: 12, color: C.slate }}>{s.present} из {s.total} занятий{s.groups.length > 1 ? ` · ${s.groups.length} групп` : ''}</div>
+                </div>
+                <div style={{ width: 90, height: 6, background: C.grey, borderRadius: 3 }}>
+                  <div style={{ width: `${s.pct}%`, height: '100%', background: pctColor(s.pct), borderRadius: 3 }} />
+                </div>
+                <span style={{ minWidth: 52, textAlign: 'right', fontWeight: 800, fontSize: 15, color: pctColor(s.pct) }}>{s.pct}%</span>
               </div>
-              <div style={{ width: 90, height: 6, background: C.grey, borderRadius: 3 }}>
-                <div style={{ width: `${s.pct}%`, height: '100%', background: pctColor(s.pct), borderRadius: 3 }} />
-              </div>
-              <span style={{ minWidth: 52, textAlign: 'right', fontWeight: 800, fontSize: 15, color: pctColor(s.pct) }}>{s.pct}%</span>
+
+              {/* Разбивка по группам ученика */}
+              {s.groups.length > 0 && (
+                <div style={{ marginTop: 10, paddingLeft: 2, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {s.groups.map((g, gi) => (
+                    <div key={gi} className="rowflex" style={{ gap: 10 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: pctColor(g.pct), marginRight: 7, verticalAlign: 'middle' }} />
+                        {g.name || 'без группы'}
+                      </span>
+                      <span style={{ fontSize: 11.5, color: C.faint }}>{g.present}/{g.total}</span>
+                      <span style={{ minWidth: 42, textAlign: 'right', fontSize: 12.5, fontWeight: 700, color: pctColor(g.pct) }}>{g.pct}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -129,7 +158,7 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
       {!empty && view === 'students' && (
         <p style={{ fontSize: 12.5, color: C.faint, marginTop: 12, lineHeight: 1.5 }}>
           <TrendingDown size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-          Ученики отсортированы — вверху те, кто ходит хуже всего. Зелёный ≥85%, оранжевый 65–85%, красный ниже 65%.
+          Ученики отсортированы — вверху те, кто ходит хуже всего. Под каждым — разбивка по его группам. Зелёный ≥85%, оранжевый 65–85%, красный ниже 65%.
         </p>
       )}
     </>

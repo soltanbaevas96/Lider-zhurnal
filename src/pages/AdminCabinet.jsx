@@ -4,7 +4,7 @@ import {
   Download, ArrowLeft, UserCheck, ClipboardCheck, Plus,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { C, hoursBetween, nameOf, initials, avColorByIndex, periodRange } from '../lib/utils'
+import { C, lessonCount, nameOf, initials, avColorByIndex, periodRange } from '../lib/utils'
 import { Stat, MiniStat } from '../components/ui'
 import PeriodPicker from '../components/PeriodPicker'
 import LessonTable from '../components/LessonTable'
@@ -20,7 +20,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
     const done = lessons.filter((l) => l.teacher_id === t.id && l.status === 'проведён')
     return {
       ...t, idx: i,
-      hours: done.reduce((s, l) => s + hoursBetween(l.start_time, l.end_time), 0),
+      hours: done.reduce((s, l) => s + lessonCount(l), 0),
       count: done.length,
       groups: new Set(done.map((l) => l.group_id)).size,
       noPlan: done.filter((l) => !l.plan_path).length,
@@ -33,12 +33,12 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
     done.forEach((l) => {
       withT[l.teacher_id] = withT[l.teacher_id] || { count: 0, hours: 0 }
       withT[l.teacher_id].count++
-      withT[l.teacher_id].hours += hoursBetween(l.start_time, l.end_time)
+      withT[l.teacher_id].hours += lessonCount(l)
     })
     return {
       ...a,
       count: done.length,
-      hours: done.reduce((s, l) => s + hoursBetween(l.start_time, l.end_time), 0),
+      hours: done.reduce((s, l) => s + lessonCount(l), 0),
       teachers: Object.entries(withT)
         .map(([tid, v]) => ({ name: nameOf(dict.teachers, tid), ...v }))
         .sort((x, y) => y.hours - x.hours),
@@ -48,7 +48,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
   const totals = useMemo(() => {
     const done = lessons.filter((l) => l.status === 'проведён')
     return {
-      hours: done.reduce((s, l) => s + hoursBetween(l.start_time, l.end_time), 0),
+      hours: done.reduce((s, l) => s + lessonCount(l), 0),
       count: done.length,
       noPlan: done.filter((l) => !l.plan_path).length,
       cancelled: lessons.filter((l) => l.status === 'отменён').length,
@@ -62,21 +62,21 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
 
   function exportAll() {
     const rows = lessons.map((l) => ({
-      Дата: l.lesson_date, Начало: l.start_time?.slice(0, 5), Конец: l.end_time?.slice(0, 5),
-      Часов: hoursBetween(l.start_time, l.end_time),
+      Дата: l.lesson_date, 
+      Уроков: lessonCount(l),
       Преподаватель: nameOf(dict.teachers, l.teacher_id), Группа: nameOf(dict.groups, l.group_id),
       Ассистент: l.assistant_id ? nameOf(dict.assistants, l.assistant_id) : '—',
       Тема: l.topic, Учеников: l.students, Статус: l.status, 'План урока': l.plan_path ? 'есть' : 'нет',
     }))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Уроки')
-    const summary = teacherStats.map((t) => ({ Преподаватель: t.full_name, Часов: t.hours, Уроков: t.count, 'Без плана': t.noPlan }))
+    const summary = teacherStats.map((t) => ({ Преподаватель: t.full_name, Уроков: t.hours, Уроков: t.count, 'Без плана': t.noPlan }))
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Часы по учителям')
     const asst = []
     assistantStats.forEach((a) => {
-      if (!a.count) { asst.push({ Ассистент: a.full_name, Преподаватель: '—', Занятий: 0, Часов: 0 }); return }
-      a.teachers.forEach((t) => asst.push({ Ассистент: a.full_name, Преподаватель: t.name, Занятий: t.count, Часов: t.hours }))
-      asst.push({ Ассистент: a.full_name, Преподаватель: 'ИТОГО', Занятий: a.count, Часов: a.hours })
+      if (!a.count) { asst.push({ Ассистент: a.full_name, Преподаватель: '—', Занятий: 0, Уроков: 0 }); return }
+      a.teachers.forEach((t) => asst.push({ Ассистент: a.full_name, Преподаватель: t.name, Занятий: t.count, Уроков: t.hours }))
+      asst.push({ Ассистент: a.full_name, Преподаватель: 'ИТОГО', Занятий: a.count, Уроков: a.hours })
     })
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(asst), 'Ассистенты')
     XLSX.writeFile(wb, `Отчёт_${periodLabel.replace(' ', '_')}.xlsx`)
@@ -104,7 +104,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
       </div>
 
       <div className="stats" style={{ marginBottom: 28 }}>
-        <Stat icon={Clock} label="Всего часов" value={totals.hours.toLocaleString('ru-RU')} tint={C.brand} bg={C.brandSoft} />
+        <Stat icon={Clock} label="Всего уроков" value={totals.hours.toLocaleString('ru-RU')} tint={C.brand} bg={C.brandSoft} />
         <Stat icon={CheckCircle2} label="Проведено уроков" value={totals.count} tint={C.ok} bg={C.okSoft} />
         <Stat icon={FileText} label="Без плана урока" value={totals.noPlan} tint={C.warn} bg={C.warnSoft} />
         <Stat icon={AlertTriangle} label="Отменено" value={totals.cancelled} tint={C.slate} bg={C.grey} />
@@ -141,7 +141,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
                 <ChevronRight size={18} color={C.faint} />
               </div>
               <div className="rowflex" style={{ gap: 0, borderTop: `1px solid ${C.line}`, paddingTop: 13 }}>
-                <MiniStat value={t.hours} label="часов" tint={C.brand} />
+                <MiniStat value={t.hours} label="уроков" tint={C.brand} />
                 <MiniStat value={t.count} label="уроков" tint={C.ink} />
                 <MiniStat value={t.groups} label="групп" tint={C.ink} />
               </div>
@@ -169,7 +169,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
                 </div>
               </div>
               <div className="rowflex" style={{ gap: 0, borderTop: `1px solid ${C.line}`, borderBottom: a.teachers.length ? `1px solid ${C.line}` : 'none', padding: '13px 0' }}>
-                <MiniStat value={a.hours} label="часов" tint={C.teal} />
+                <MiniStat value={a.hours} label="уроков" tint={C.teal} />
                 <MiniStat value={a.count} label="занятий" tint={C.ink} />
                 <MiniStat value={a.teachers.length} label="препод." tint={C.ink} />
               </div>
@@ -179,7 +179,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
                   {a.teachers.map((t) => (
                     <div key={t.name} className="rowflex" style={{ justifyContent: 'space-between', fontSize: 13, padding: '5px 0' }}>
                       <span style={{ color: C.ink }}>{t.name}</span>
-                      <span style={{ color: C.slate }}><b style={{ color: C.teal }}>{t.hours}</b> ч · {t.count} зан.</span>
+                      <span style={{ color: C.slate }}><b style={{ color: C.teal }}>{t.hours}</b> ур. · {t.count} зан.</span>
                     </div>
                   ))}
                 </div>
@@ -198,14 +198,14 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
   const [editing, setEditing] = useState(null)
   const own = lessons.filter((l) => l.teacher_id === t.id)
   const done = own.filter((l) => l.status === 'проведён')
-  const hours = done.reduce((s, l) => s + hoursBetween(l.start_time, l.end_time), 0)
+  const hours = done.reduce((s, l) => s + lessonCount(l), 0)
   const noPlan = done.filter((l) => !l.plan_path).length
 
   const byGroup = useMemo(() => {
     const m = {}
     done.forEach((l) => {
       m[l.group_id] = m[l.group_id] || { hours: 0, count: 0 }
-      m[l.group_id].hours += hoursBetween(l.start_time, l.end_time)
+      m[l.group_id].hours += lessonCount(l)
       m[l.group_id].count++
     })
     return Object.entries(m).map(([gid, v]) => ({ name: nameOf(dict.groups, gid), ...v })).sort((a, b) => b.hours - a.hours)
@@ -213,8 +213,8 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
 
   function exportOne() {
     const rows = own.map((l) => ({
-      Дата: l.lesson_date, Начало: l.start_time?.slice(0, 5), Конец: l.end_time?.slice(0, 5),
-      Часов: hoursBetween(l.start_time, l.end_time), Группа: nameOf(dict.groups, l.group_id),
+      Дата: l.lesson_date, 
+      Уроков: lessonCount(l), Группа: nameOf(dict.groups, l.group_id),
       Ассистент: l.assistant_id ? nameOf(dict.assistants, l.assistant_id) : '—',
       Тема: l.topic, Учеников: l.students, Статус: l.status, План: l.plan_path ? 'есть' : 'нет',
     }))
@@ -244,7 +244,7 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
           </button>
         </div>
         <div className="rowflex" style={{ gap: 24, marginTop: 20, flexWrap: 'wrap' }}>
-          <BigNum value={hours} label="часов за период" />
+          <BigNum value={hours} label="уроков за период" />
           <BigNum value={done.length} label="уроков" />
           <BigNum value={byGroup.length} label="групп" />
           <BigNum value={noPlan} label="без плана" warn={noPlan > 0} />
@@ -261,7 +261,7 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
                 <div key={g.name} style={{ padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
                   <div className="rowflex" style={{ justifyContent: 'space-between', marginBottom: 7 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600 }}><Users size={13} style={{ verticalAlign: -2, marginRight: 5, color: C.slate }} />{g.name}</span>
-                    <span style={{ fontSize: 13, color: C.slate }}><b style={{ color: C.brand }}>{g.hours}</b> ч · {g.count} ур.</span>
+                    <span style={{ fontSize: 13, color: C.slate }}><b style={{ color: C.brand }}>{g.hours}</b> ур. · {g.count} зап.</span>
                   </div>
                   <div style={{ height: 6, background: C.grey, borderRadius: 3 }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg,${C.brand},${C.brand2})`, borderRadius: 3 }} />

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Clock, CheckCircle2, FileText, Plus } from 'lucide-react'
-import { C, hoursBetween } from '../lib/utils'
+import { C, lessonCount } from '../lib/utils'
 import { Stat } from '../components/ui'
 import PeriodPicker from '../components/PeriodPicker'
 import LessonTable from '../components/LessonTable'
@@ -27,7 +27,7 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
 
   const own = lessons.filter((l) => l.teacher_id === teacher.id)
   const done = own.filter((l) => l.status === 'проведён')
-  const myHours = done.reduce((s, l) => s + hoursBetween(l.start_time, l.end_time), 0)
+  const myHours = done.reduce((s, l) => s + lessonCount(l), 0)
 
   return (
     <>
@@ -45,7 +45,7 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
       </div>
 
       <div className="stats" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 28 }}>
-        <Stat icon={Clock} label="Мои часы" value={myHours} tint={C.brand} bg={C.brandSoft} />
+        <Stat icon={Clock} label="Мои уроки" value={myHours} tint={C.brand} bg={C.brandSoft} />
         <Stat icon={CheckCircle2} label="Проведено" value={done.length} tint={C.ok} bg={C.okSoft} />
         <Stat icon={FileText} label="Без плана" value={done.filter((l) => !l.plan_path).length} tint={C.warn} bg={C.warnSoft} />
       </div>

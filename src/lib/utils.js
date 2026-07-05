@@ -1,9 +1,6 @@
 // ---------- ВЫЧИСЛЕНИЯ ----------
-export const hoursBetween = (start, end) => {
-  const [sh, sm] = start.split(':').map(Number)
-  const [eh, em] = end.split(':').map(Number)
-  return Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
-}
+// Количество уроков в записи (1..3). Заменяет прежний подсчёт часов.
+export const lessonCount = (lesson) => Number(lesson?.lessons_count) || 1
 
 export const fmtDate = (d) =>
   new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })
@@ -69,6 +66,8 @@ const fmtShort = (d) => new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { 
 // Читабельная подпись периода для заголовков и имён файлов
 export function periodLabelOf(period) {
   if (!period || period.mode === 'all') return 'Весь период'
+  if (period.mode === 'day') return 'Сегодня'
+  if (period.mode === 'week') return 'Эта неделя'
   if (period.mode === 'month') {
     const opt = monthOptions(13).find((m) => m.v === period.month)
     return opt?.label ?? period.month
@@ -78,9 +77,21 @@ export function periodLabelOf(period) {
   return 'Период'
 }
 
+// helpers для дня/недели
+function todayISO() { return new Date().toISOString().slice(0, 10) }
+function weekRangeNow() {
+  const d = new Date()
+  const day = (d.getDay() + 6) % 7 // понедельник=0
+  const mon = new Date(d); mon.setDate(d.getDate() - day)
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
+  return { from: mon.toISOString().slice(0, 10), to: sun.toISOString().slice(0, 10) }
+}
+
 // Превращает объект периода в { from, to } | null для запроса
 export function periodRange(period) {
   if (!period || period.mode === 'all') return null
+  if (period.mode === 'day') { const t = todayISO(); return { from: t, to: t } }
+  if (period.mode === 'week') return weekRangeNow()
   if (period.mode === 'month') return monthRange(period.month)
   if (period.mode === 'range' && period.from && period.to) return { from: period.from, to: period.to }
   return null
