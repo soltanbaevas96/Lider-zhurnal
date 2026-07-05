@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import {
-  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound,
+  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search,
 } from 'lucide-react'
+import DataTable from '../components/DataTable'
 import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, officeOf, langOf, OFFICES } from '../lib/utils'
 import { inp, Field } from '../components/ui'
 import { GroupMultiSelect } from '../components/GroupSearchSelect'
@@ -22,6 +23,7 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
   const [viewGroup, setViewGroup] = useState(null) // группа для просмотра учеников
   const [gOffice, setGOffice] = useState('Маргулана') // фильтр групп: офис
   const [gLang, setGLang] = useState('каз') // фильтр групп: язык
+  const [gQuery, setGQuery] = useState('') // поиск по группам
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -34,9 +36,11 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
   ]
 
   let rows = (dict[tab] || []).filter((r) => showArchived ? true : !r.archived)
-  // Группы дополнительно фильтруем по офису и языку (из note)
+  // Группы дополнительно фильтруем по офису и языку (из note) + поиск
   if (tab === 'groups') {
     rows = rows.filter((r) => officeOf(r.note) === gOffice && langOf(r.note) === gLang)
+    const gq = (gQuery || '').toLowerCase().trim()
+    if (gq) rows = rows.filter((r) => (r.name || '').toLowerCase().includes(gq) || (r.note || '').toLowerCase().includes(gq))
   }
 
   async function handleSave(form) {
@@ -123,67 +127,73 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
       ) : (
       <>
       {tab === 'groups' && (
-        <OfficeLangTabs office={gOffice} lang={gLang} setOffice={setGOffice} setLang={setGLang} count={rows.length} />
+        <>
+          <OfficeLangTabs office={gOffice} lang={gLang} setOffice={setGOffice} setLang={setGLang} count={rows.length} />
+          <div className="search-box" style={{ marginBottom: 12, maxWidth: 360 }}>
+            <Search size={15} color={C.slate} style={{ position: 'absolute', left: 11, top: 9 }} />
+            <input value={gQuery} onChange={(e) => setGQuery(e.target.value)} placeholder="Поиск группы по коду…" />
+          </div>
+        </>
       )}
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
         {rows.length === 0 && (
           <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>{tab === 'groups' ? 'В этом офисе/языке групп нет.' : 'Пусто. Нажмите «Добавить».'}</div>
         )}
         {rows.map((r, i) => (
-          <div key={r.id} className="rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none', opacity: r.archived ? 0.5 : 1 }}>
+          <div key={r.id} className="rowflex lrow" style={{ gap: 11, padding: '8px 14px', borderTop: i ? `1px solid ${C.line}` : 'none', opacity: r.archived ? 0.5 : 1 }}>
             {tab === 'groups' ? (
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}><Users size={19} /></div>
+              <div style={{ width: 32, height: 32, borderRadius: 9, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}><Users size={16} /></div>
             ) : tab === 'subjects' ? (
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: '#f3e8ff', color: '#7c3aed', display: 'grid', placeItems: 'center' }}><BookOpen size={19} /></div>
+              <div style={{ width: 32, height: 32, borderRadius: 9, background: '#f3e8ff', color: '#7c3aed', display: 'grid', placeItems: 'center' }}><BookOpen size={16} /></div>
             ) : tab === 'assistants' ? (
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: C.tealSoft, color: C.teal, display: 'grid', placeItems: 'center' }}><UserCheck size={19} /></div>
+              <div style={{ width: 32, height: 32, borderRadius: 9, background: C.tealSoft, color: C.teal, display: 'grid', placeItems: 'center' }}><UserCheck size={16} /></div>
             ) : (
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: avColorByIndex(i), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 14 }}>{initials(r.full_name)}</div>
+              <div style={{ width: 32, height: 32, borderRadius: 9, background: avColorByIndex(i), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>{initials(r.full_name)}</div>
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="rowflex" style={{ gap: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: 14.5 }}>{r.full_name || r.name}</span>
+                <span style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.full_name || r.name}</span>
                 {tab === 'teachers' && !r.archived && (
                   r.profile_id
-                    ? <span className="rowflex" style={{ gap: 3, fontSize: 11, fontWeight: 600, color: C.ok, background: C.okSoft, padding: '2px 8px', borderRadius: 20 }}><ShieldCheck size={11} /> есть доступ</span>
-                    : <span style={{ fontSize: 11, fontWeight: 600, color: C.slate, background: C.grey, padding: '2px 8px', borderRadius: 20 }}>нет доступа</span>
+                    ? <span className="rowflex" style={{ gap: 3, fontSize: 10.5, fontWeight: 600, color: C.ok, background: C.okSoft, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}><ShieldCheck size={10} /> доступ</span>
+                    : <span style={{ fontSize: 10.5, fontWeight: 600, color: C.slate, background: C.grey, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>нет доступа</span>
                 )}
               </div>
-              <div style={{ fontSize: 12.5, color: C.slate }}>
+              <div style={{ fontSize: 11.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {tab === 'teachers' && (r.phone || 'преподаватель')}
                 {tab === 'assistants' && (r.phone || 'ассистент')}
-                {tab === 'groups' && (r.archived ? 'в архиве' : 'активна')}
+                {tab === 'groups' && (r.note || (r.archived ? 'в архиве' : 'активна'))}
                 {tab === 'subjects' && 'предмет'}
               </div>
             </div>
             {tab === 'subjects' ? (
               <button onClick={() => setConfirmEdit(r)} disabled={busy} title="Переименовать"
-                style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
+                style={{ padding: 7, borderRadius: 8, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={14} /></button>
             ) : r.archived ? (
               <button onClick={() => setConfirmArch(r)} disabled={busy} className="rowflex" title="Восстановить"
-                style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.ok, background: C.okSoft, border: 'none', cursor: 'pointer' }}>
-                <RotateCcw size={14} /> <span className="hide-sm">Вернуть</span></button>
+                style={{ gap: 5, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.ok, background: C.okSoft, border: 'none', cursor: 'pointer' }}>
+                <RotateCcw size={13} /> <span className="hide-sm">Вернуть</span></button>
             ) : (
               <>
                 {tab === 'groups' && (
                   <button onClick={() => setViewGroup(r)} disabled={busy} className="rowflex" title="Ученики группы"
-                    style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.teal, background: C.tealSoft, border: 'none', cursor: 'pointer' }}>
-                    <Users size={14} /> <span className="hide-sm">Ученики</span></button>
+                    style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.teal, background: C.tealSoft, border: 'none', cursor: 'pointer' }}>
+                    <Users size={13} /> <span className="hide-sm">Ученики</span></button>
                 )}
                 {tab === 'teachers' && (
                   <button onClick={() => setLinkTeacher(r)} disabled={busy} className="rowflex" title="Группы и предметы"
-                    style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: '#7c3aed', background: '#f3e8ff', border: 'none', cursor: 'pointer' }}>
-                    <Link2 size={14} /> <span className="hide-sm">Группы/предметы</span></button>
+                    style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#7c3aed', background: '#f3e8ff', border: 'none', cursor: 'pointer' }}>
+                    <Link2 size={13} /> <span className="hide-sm">Группы/предметы</span></button>
                 )}
                 {tab === 'teachers' && !r.profile_id && (
                   <button onClick={() => setInvite(r)} disabled={busy} className="rowflex" title="Выдать доступ в систему"
-                    style={{ gap: 5, padding: '7px 11px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
-                    <KeyRound size={14} /> <span className="hide-sm">Доступ</span></button>
+                    style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
+                    <KeyRound size={13} /> <span className="hide-sm">Доступ</span></button>
                 )}
                 <button onClick={() => setConfirmEdit(r)} disabled={busy} title="Редактировать"
-                  style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
+                  style={{ padding: 7, borderRadius: 8, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={14} /></button>
                 <button onClick={() => setConfirmArch(r)} disabled={busy} title="В архив"
-                  style={{ padding: 8, borderRadius: 9, color: C.warn, background: C.warnSoft, border: 'none', cursor: 'pointer' }}><Archive size={15} /></button>
+                  style={{ padding: 7, borderRadius: 8, color: C.warn, background: C.warnSoft, border: 'none', cursor: 'pointer' }}><Archive size={14} /></button>
               </>
             )}
           </div>
@@ -470,17 +480,52 @@ function StudentsManage({ groups }) {
 
   const groupName = (id) => groups.find((g) => g.id === id)?.name
 
+  // предметы ученика из contact ("Офис · язык · предметы: X, Y")
+  const subjectsOf = (contact) => {
+    const m = (contact || '').split('предметы:')[1]
+    return m ? m.trim() : ''
+  }
+
+  const columns = [
+    {
+      key: 'full_name', label: 'Ученик', width: '30%',
+      render: (s) => (
+        <div className="rowflex" style={{ gap: 10 }}>
+          <div className="av" style={{ width: 30, height: 30, fontSize: 12, background: avColorByIndex(s._i || 0) }}>{initials(s.full_name)}</div>
+          <span style={{ fontWeight: 600 }}>{s.full_name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'groups', label: 'Группы', sortable: false,
+      sortValue: (s) => s.groupIds.length,
+      render: (s) => s.groupIds.length
+        ? <span style={{ color: C.ink }}>{s.groupIds.map(groupName).filter(Boolean).join(', ')}</span>
+        : <span style={{ color: C.faint }}>без группы</span>,
+    },
+    {
+      key: 'subjects', label: 'Предметы', sortable: false,
+      render: (s) => <span style={{ color: C.slate }}>{subjectsOf(s.contact) || '—'}</span>,
+    },
+    {
+      key: 'edit', label: '', width: 46, sortable: false, num: true,
+      render: () => <Pencil size={15} color={C.slate} style={{ display: 'inline' }} />,
+    },
+  ]
+
+  const rowsIndexed = filtered.map((s, i) => ({ ...s, _i: i }))
+
   return (
     <>
       <OfficeLangTabs office={office} lang={lang} setOffice={setOffice} setLang={setLang} count={filtered.length} />
-      <div className="rowflex" style={{ marginBottom: 12, gap: 10 }}>
-        <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 340 }}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика…"
-            style={{ width: '100%', padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13, outline: 'none', background: C.card }} />
+      <div className="fbar">
+        <div className="search-box">
+          <Search size={15} color={C.slate} style={{ position: 'absolute', left: 11, top: 9 }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика…" />
         </div>
         <button onClick={() => setModal('new')} className="rowflex"
-          style={{ marginLeft: 'auto', gap: 7, padding: '10px 17px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-          <Plus size={17} /> Добавить ученика
+          style={{ gap: 6, padding: '8px 15px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <Plus size={16} /> Добавить
         </button>
       </div>
 
@@ -489,27 +534,9 @@ function StudentsManage({ groups }) {
       {students === null ? (
         <div style={{ padding: 30, textAlign: 'center', color: C.slate }}>Загрузка…</div>
       ) : (
-        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
-          {filtered.length === 0 && (
-            <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>
-              {students.length === 0 ? 'Учеников пока нет. Нажмите «Добавить ученика».' : 'Ничего не найдено.'}
-            </div>
-          )}
-          {filtered.map((s, i) => (
-            <div key={s.id} className="rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: avColorByIndex(i), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 14 }}>{initials(s.full_name)}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14.5 }}>{s.full_name}</div>
-                <div style={{ fontSize: 12.5, color: C.slate }}>
-                  {s.groupIds.length ? s.groupIds.map(groupName).filter(Boolean).join(', ') : 'без группы'}
-                  {s.contact ? ` · ${s.contact}` : ''}
-                </div>
-              </div>
-              <button onClick={() => setModal({ row: s })} title="Редактировать"
-                style={{ padding: 8, borderRadius: 9, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={15} /></button>
-            </div>
-          ))}
-        </div>
+        <DataTable columns={columns} rows={rowsIndexed} pageSize={30}
+          onRowClick={(s) => setModal({ row: s })}
+          initialSort={{ key: 'full_name', dir: 'asc' }} />
       )}
 
       {modal && (

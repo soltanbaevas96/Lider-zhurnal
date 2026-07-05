@@ -69,14 +69,46 @@ export default function App() {
       <style>{`
         *{box-sizing:border-box;} button{font-family:inherit;}
         input,select{font-family:inherit;}
-        .wrap{max-width:1120px;margin:0 auto;padding:0 16px;}
-        .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+        .wrap{max-width:1320px;margin:0 auto;padding:0 18px;}
+        .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
         .tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
         .rowflex{display:flex;align-items:center;gap:12px;}
         @media(max-width:680px){ .stats{grid-template-columns:1fr 1fr;} .hide-sm{display:none!important;} }
         .card-hover{transition:transform .15s ease, box-shadow .15s ease;}
         .card-hover:hover{transform:translateY(-3px);box-shadow:0 10px 24px rgba(67,56,202,.13);}
         .lrow:hover{background:#faf9ff;}
+
+        /* ---------- ПЛОТНЫЕ ТАБЛИЦЫ ---------- */
+        .dt{width:100%;border-collapse:collapse;font-size:13px;}
+        .dt thead th{position:sticky;top:0;background:#f7f7fb;text-align:left;font-size:11.5px;font-weight:700;
+          color:#6b7194;text-transform:uppercase;letter-spacing:.03em;padding:9px 12px;border-bottom:1px solid #e8e9f3;
+          white-space:nowrap;user-select:none;}
+        .dt thead th.sortable{cursor:pointer;}
+        .dt thead th.sortable:hover{color:#4338ca;}
+        .dt tbody td{padding:9px 12px;border-bottom:1px solid #f0f1f7;vertical-align:middle;}
+        .dt tbody tr{transition:background .1s;}
+        .dt tbody tr:hover{background:#faf9ff;cursor:pointer;}
+        .dt tbody tr:last-child td{border-bottom:none;}
+        .dt .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;}
+        .dt-wrap{background:#fff;border:1px solid #e8e9f3;border-radius:12px;overflow:hidden;}
+        .dt-scroll{max-height:none;overflow:auto;}
+
+        /* компактные бейджи и чипы фильтров */
+        .fbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+        .fchip{padding:6px 12px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid #e8e9f3;background:#fff;color:#6b7194;transition:all .12s;white-space:nowrap;}
+        .fchip:hover{border-color:#c9cbe0;}
+        .fchip.on{background:#4338ca;border-color:#4338ca;color:#fff;}
+        .fseg{display:flex;background:#eef0f6;border-radius:9px;padding:3px;}
+        .fseg button{padding:6px 13px;border-radius:7px;font-size:12.5px;font-weight:700;border:none;cursor:pointer;background:transparent;color:#6b7194;}
+        .fseg button.on{background:#fff;color:#4338ca;box-shadow:0 1px 3px rgba(20,24,58,.12);}
+        .search-box{flex:1;min-width:180px;position:relative;}
+        .search-box input{width:100%;padding:8px 12px 8px 34px;border:1px solid #e8e9f3;border-radius:9px;font-size:13px;outline:none;background:#fff;}
+        .search-box input:focus{border-color:#4338ca;}
+        .pager{display:flex;align-items:center;gap:6px;justify-content:center;padding:12px;}
+        .pager button{min-width:32px;height:32px;border-radius:8px;border:1px solid #e8e9f3;background:#fff;font-size:13px;font-weight:600;color:#6b7194;cursor:pointer;}
+        .pager button.on{background:#4338ca;border-color:#4338ca;color:#fff;}
+        .pager button:disabled{opacity:.4;cursor:default;}
+        .av{border-radius:8px;color:#fff;display:grid;place-items:center;font-weight:700;flex-shrink:0;}
       `}</style>
 
       <header style={{ background: C.card, borderBottom: `1px solid ${C.line}`, position: 'sticky', top: 0, zIndex: 20 }}>

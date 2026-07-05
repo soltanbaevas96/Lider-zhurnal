@@ -134,19 +134,19 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
       </div>
 
       {tab === 'teachers' ? (
-        <div className="tgrid">
+        <div className="tgrid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(215px,1fr))', gap: 10 }}>
           {filtered.map((t) => (
             <button key={t.id} onClick={() => setOpenTeacher(t.id)} className="card-hover"
-              style={{ textAlign: 'left', background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, display: 'block', cursor: 'pointer' }}>
-              <div className="rowflex" style={{ marginBottom: 14 }}>
-                <div style={{ width: 46, height: 46, borderRadius: 13, background: avColorByIndex(t.idx), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 15 }}>{initials(t.full_name)}</div>
+              style={{ textAlign: 'left', background: C.card, border: `1px solid ${C.line}`, borderRadius: 13, padding: 13, display: 'block', cursor: 'pointer' }}>
+              <div className="rowflex" style={{ marginBottom: 11, gap: 10 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: avColorByIndex(t.idx), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 13 }}>{initials(t.full_name)}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.full_name}</div>
-                  <div style={{ fontSize: 12.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.subjectsText || 'Преподаватель'}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.full_name}</div>
+                  <div style={{ fontSize: 11.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.subjectsText || 'Преподаватель'}</div>
                 </div>
-                <ChevronRight size={18} color={C.faint} />
+                <ChevronRight size={16} color={C.faint} />
               </div>
-              <div className="rowflex" style={{ gap: 0, borderTop: `1px solid ${C.line}`, paddingTop: 13 }}>
+              <div className="rowflex" style={{ gap: 0, borderTop: `1px solid ${C.line}`, paddingTop: 10 }}>
                 <MiniStat value={t.hours} label="уроков" tint={C.brand} />
                 <MiniStat value={t.groups} label="групп" tint={C.ink} />
                 <MiniStat value={t.noPlan} label="без плана" tint={t.noPlan > 0 ? C.warn : C.ink} />

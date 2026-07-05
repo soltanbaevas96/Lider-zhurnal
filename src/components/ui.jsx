@@ -3,12 +3,14 @@ import { C } from '../lib/utils'
 
 export function Stat({ icon: Icon, label, value, tint, bg }) {
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: '17px 15px' }}>
-      <div style={{ width: 36, height: 36, borderRadius: 10, background: bg, color: tint, display: 'grid', placeItems: 'center', marginBottom: 11 }}>
+    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '13px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ width: 38, height: 38, borderRadius: 10, background: bg, color: tint, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
         <Icon size={19} />
       </div>
-      <div style={{ fontSize: 25, fontWeight: 800, lineHeight: 1, letterSpacing: -0.5 }}>{value}</div>
-      <div style={{ fontSize: 12, color: C.slate, marginTop: 6 }}>{label}</div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 23, fontWeight: 800, lineHeight: 1, letterSpacing: -0.5 }}>{value}</div>
+        <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+      </div>
     </div>
   )
 }
@@ -16,8 +18,8 @@ export function Stat({ icon: Icon, label, value, tint, bg }) {
 export function MiniStat({ value, label, tint }) {
   return (
     <div style={{ flex: 1, textAlign: 'center' }}>
-      <div style={{ fontSize: 19, fontWeight: 800, color: tint, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 11, color: C.slate, marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 800, color: tint, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 10.5, color: C.slate, marginTop: 3 }}>{label}</div>
     </div>
   )
 }
