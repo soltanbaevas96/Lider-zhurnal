@@ -2,14 +2,15 @@ import { supabase } from './supabase'
 
 // ---------- СПРАВОЧНИКИ ----------
 export async function fetchDictionaries() {
-  const [subjects, groups, teachers, assistants, tSubjects] = await Promise.all([
+  const [subjects, groups, teachers, assistants, tSubjects, students] = await Promise.all([
     supabase.from('subjects').select('*').order('name'),
     supabase.from('groups').select('*').eq('archived', false).order('name'),
     supabase.from('teachers').select('*').eq('archived', false).order('full_name'),
     supabase.from('assistants').select('*').eq('archived', false).order('full_name'),
     supabase.from('teacher_subjects').select('teacher_id, subject_id'),
+    supabase.from('students').select('id, full_name, contact').eq('archived', false).order('full_name'),
   ])
-  const err = subjects.error || groups.error || teachers.error || assistants.error || tSubjects.error
+  const err = subjects.error || groups.error || teachers.error || assistants.error || tSubjects.error || students.error
   if (err) throw err
   // карта: teacher_id -> [subject_id, ...]
   const subjectsByTeacher = {}
@@ -21,6 +22,7 @@ export async function fetchDictionaries() {
     groups: groups.data,
     teachers: teachers.data,
     assistants: assistants.data,
+    students: students.data,
     subjectsByTeacher,
   }
 }
@@ -288,4 +290,33 @@ export async function fetchAllStudents() {
     .select('id, full_name, contact').eq('archived', false).order('full_name')
   if (error) throw error
   return data
+}
+
+// ---------- ТАБЕЛИ (преподаватели + ученики) ----------
+// Единый сбор данных за период для расчёта табелей.
+export async function fetchTimesheetData(period) {
+  // Уроки за период (только проведённые важны для табеля, но тянем все — отменённые отфильтруем)
+  let lq = supabase.from('lessons')
+    .select('id, group_id, teacher_id, assistant_id, lesson_date, status, lessons_count, topic')
+  if (period?.from) lq = lq.gte('lesson_date', period.from)
+  if (period?.to) lq = lq.lte('lesson_date', period.to)
+  const { data: lessons, error: le } = await lq
+  if (le) throw le
+
+  const lessonIds = lessons.map((l) => l.id)
+  let attendance = []
+  if (lessonIds.length) {
+    const { data: att, error: ae } = await supabase
+      .from('attendance').select('lesson_id, student_id, present')
+      .in('lesson_id', lessonIds)
+    if (ae) throw ae
+    attendance = att
+  }
+
+  // Связки ученик-группа (чтобы знать состав групп)
+  const { data: links, error: lke } = await supabase
+    .from('student_groups').select('student_id, group_id')
+  if (lke) throw lke
+
+  return { lessons, attendance, studentGroups: links }
 }

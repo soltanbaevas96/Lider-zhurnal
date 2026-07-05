@@ -126,3 +126,10 @@ export function langOf(text) {
   if (/\bрус\b/.test(t) || t.includes('рус ') || t.includes('· рус')) return 'рус'
   return null
 }
+
+// Извлекает предмет из note группы (формат "Предмет · Офис · язык")
+export function subjectOf(note) {
+  if (!note) return null
+  const first = String(note).split('·')[0]
+  return first ? first.trim() : null
+}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { GraduationCap, LogOut, Settings } from 'lucide-react'
+import { GraduationCap, LogOut, Settings, FileSpreadsheet } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, periodRange, periodLabelOf } from './lib/utils'
@@ -8,6 +8,7 @@ import Login from './pages/Login'
 import TeacherCabinet from './pages/TeacherCabinet'
 import AdminCabinet from './pages/AdminCabinet'
 import Manage from './pages/Manage'
+import Timesheets from './pages/Timesheets'
 
 export default function App() {
   const { session, profile, teacher, isAdmin, loading, signOut } = useAuth()
@@ -95,6 +96,14 @@ export default function App() {
             <span className="hide-sm" style={{ fontSize: 13, color: C.slate }}>{profile?.full_name}</span>
             {isAdmin && (
               <button
+                onClick={() => setView(view === 'timesheets' ? 'cabinet' : 'timesheets')}
+                className="rowflex" title="Табели для зарплаты и посещаемости"
+                style={{ gap: 6, padding: '8px 13px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: view === 'timesheets' ? C.brand : C.slate, background: view === 'timesheets' ? C.brandSoft : C.grey, border: 'none', cursor: 'pointer' }}>
+                <FileSpreadsheet size={15} /> <span className="hide-sm">Табели</span>
+              </button>
+            )}
+            {isAdmin && (
+              <button
                 onClick={async () => {
                   if (view === 'manage') { setView('cabinet'); return }
                   if (!fullDict) { try { await reloadFullDict() } catch (e) { setError(e.message) } }
@@ -118,6 +127,8 @@ export default function App() {
 
         {!dict ? (
           <Spinner label="Загрузка данных…" />
+        ) : isAdmin && view === 'timesheets' ? (
+          <Timesheets dict={dict} />
         ) : isAdmin && view === 'manage' ? (
           !fullDict ? (
             <Spinner label="Загрузка справочников…" />
