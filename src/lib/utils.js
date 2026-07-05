@@ -98,3 +98,20 @@ export const C = {
 
 export const AVATAR_COLORS = ['#4338ca', '#0d9488', '#c2410c', '#7c3aed', '#0369a1', '#be185d']
 export const avColorByIndex = (i) => AVATAR_COLORS[i % AVATAR_COLORS.length]
+
+// ---------- ОФИС И ЯЗЫК (из note группы / contact ученика) ----------
+export const OFFICES = ['Маргулана', 'Усолка', 'Торайгырова']
+
+// Извлекает офис из строки-заметки (ищет одно из известных названий)
+export function officeOf(text) {
+  const t = text || ''
+  for (const o of OFFICES) if (t.includes(o)) return o
+  return null
+}
+// Извлекает язык: 'каз' | 'рус' | null
+export function langOf(text) {
+  const t = (text || '').toLowerCase()
+  if (/\bказ\b/.test(t) || t.includes('каз ') || t.includes('· каз')) return 'каз'
+  if (/\bрус\b/.test(t) || t.includes('рус ') || t.includes('· рус')) return 'рус'
+  return null
+}

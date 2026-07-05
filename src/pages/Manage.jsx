@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound,
 } from 'lucide-react'
-import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword } from '../lib/utils'
+import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, officeOf, langOf, OFFICES } from '../lib/utils'
 import { inp, Field } from '../components/ui'
 import {
   addTeacher, addAssistant, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
@@ -18,6 +18,8 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
   const [confirmArch, setConfirmArch] = useState(null) // строка для подтверждения архива/восстановления
   const [confirmEdit, setConfirmEdit] = useState(null) // строка для подтверждения редактирования
   const [viewGroup, setViewGroup] = useState(null) // группа для просмотра учеников
+  const [gOffice, setGOffice] = useState('Маргулана') // фильтр групп: офис
+  const [gLang, setGLang] = useState('каз') // фильтр групп: язык
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -29,7 +31,11 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
     { k: 'subjects', t: 'Предметы', icon: BookOpen },
   ]
 
-  const rows = (dict[tab] || []).filter((r) => showArchived ? true : !r.archived)
+  let rows = (dict[tab] || []).filter((r) => showArchived ? true : !r.archived)
+  // Группы дополнительно фильтруем по офису и языку (из note)
+  if (tab === 'groups') {
+    rows = rows.filter((r) => officeOf(r.note) === gOffice && langOf(r.note) === gLang)
+  }
 
   async function handleSave(form) {
     setBusy(true); setErr('')
@@ -114,9 +120,12 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
         <StudentsManage groups={(dict.groups || []).filter((g) => !g.archived)} />
       ) : (
       <>
+      {tab === 'groups' && (
+        <OfficeLangTabs office={gOffice} lang={gLang} setOffice={setGOffice} setLang={setGLang} count={rows.length} />
+      )}
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
         {rows.length === 0 && (
-          <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>Пусто. Нажмите «Добавить».</div>
+          <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>{tab === 'groups' ? 'В этом офисе/языке групп нет.' : 'Пусто. Нажмите «Добавить».'}</div>
         )}
         {rows.map((r, i) => (
           <div key={r.id} className="rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none', opacity: r.archived ? 0.5 : 1 }}>
@@ -444,6 +453,8 @@ function StudentsManage({ groups }) {
   const [students, setStudents] = useState(null)
   const [modal, setModal] = useState(null) // { row } | 'new'
   const [q, setQ] = useState('')
+  const [office, setOffice] = useState('Маргулана')
+  const [lang, setLang] = useState('каз')
   const [err, setErr] = useState('')
 
   async function reload() {
@@ -453,6 +464,7 @@ function StudentsManage({ groups }) {
   useEffect(() => { reload() }, [])
 
   const filtered = (students || []).filter((s) => {
+    if (officeOf(s.contact) !== office || langOf(s.contact) !== lang) return false
     const t = q.toLowerCase().trim()
     return !t || s.full_name.toLowerCase().includes(t)
   })
@@ -461,6 +473,7 @@ function StudentsManage({ groups }) {
 
   return (
     <>
+      <OfficeLangTabs office={office} lang={lang} setOffice={setOffice} setLang={setLang} count={filtered.length} />
       <div className="rowflex" style={{ marginBottom: 12, gap: 10 }}>
         <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 340 }}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика…"
@@ -630,6 +643,46 @@ function GroupStudentsModal({ group, onClose }) {
             </div>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ---------- ДВУХУРОВНЕВЫЕ ВКЛАДКИ: ОФИС → ЯЗЫК ----------
+function OfficeLangTabs({ office, lang, setOffice, setLang, count }) {
+  const langs = [{ k: 'каз', t: 'Казахские' }, { k: 'рус', t: 'Русские' }]
+  return (
+    <div style={{ marginBottom: 14 }}>
+      {/* Офисы */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        {OFFICES.map((o) => {
+          const a = office === o
+          return (
+            <button key={o} onClick={() => setOffice(o)}
+              style={{ padding: '9px 16px', borderRadius: 11, fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+                border: a ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                background: a ? C.brand : '#fff', color: a ? '#fff' : C.slate }}>
+              {o}
+            </button>
+          )
+        })}
+      </div>
+      {/* Языки */}
+      <div className="rowflex" style={{ gap: 10 }}>
+        <div style={{ display: 'flex', background: C.grey, borderRadius: 10, padding: 3 }}>
+          {langs.map((l) => {
+            const a = lang === l.k
+            return (
+              <button key={l.k} onClick={() => setLang(l.k)}
+                style={{ padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
+                  background: a ? C.card : 'transparent', color: a ? C.brand : C.slate,
+                  boxShadow: a ? '0 1px 4px rgba(20,24,58,.1)' : 'none' }}>
+                {l.t}
+              </button>
+            )
+          })}
+        </div>
+        <span style={{ fontSize: 12.5, color: C.faint }}>найдено: {count}</span>
       </div>
     </div>
   )
