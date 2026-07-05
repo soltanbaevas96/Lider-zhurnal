@@ -18,14 +18,20 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
 
   const teacherStats = useMemo(() => dict.teachers.map((t, i) => {
     const done = lessons.filter((l) => l.teacher_id === t.id && l.status === 'проведён')
+    const subjIds = dict.subjectsByTeacher?.[t.id] || []
+    const subjectsText = subjIds
+      .map((sid) => nameOf(dict.subjects, sid))
+      .filter(Boolean)
+      .map((n) => n.split(' / ')[0]) // короткая форма (до слэша)
+      .join(', ')
     return {
-      ...t, idx: i,
+      ...t, idx: i, subjectsText,
       hours: done.reduce((s, l) => s + lessonCount(l), 0),
       count: done.length,
       groups: new Set(done.map((l) => l.group_id)).size,
       noPlan: done.filter((l) => !l.plan_path).length,
     }
-  }), [dict.teachers, lessons])
+  }), [dict.teachers, dict.subjectsByTeacher, dict.subjects, lessons])
 
   const assistantStats = useMemo(() => dict.assistants.map((a) => {
     const done = lessons.filter((l) => l.assistant_id === a.id && l.status === 'проведён')
@@ -70,8 +76,8 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
     }))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Уроки')
-    const summary = teacherStats.map((t) => ({ Преподаватель: t.full_name, Уроков: t.hours, Уроков: t.count, 'Без плана': t.noPlan }))
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Часы по учителям')
+    const summary = teacherStats.map((t) => ({ Преподаватель: t.full_name, Предметы: t.subjectsText, Уроков: t.hours, Групп: t.groups, 'Без плана': t.noPlan }))
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Сводка по преподавателям')
     const asst = []
     assistantStats.forEach((a) => {
       if (!a.count) { asst.push({ Ассистент: a.full_name, Преподаватель: '—', Занятий: 0, Уроков: 0 }); return }
@@ -136,20 +142,15 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
                 <div style={{ width: 46, height: 46, borderRadius: 13, background: avColorByIndex(t.idx), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 15 }}>{initials(t.full_name)}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.full_name}</div>
-                  <div style={{ fontSize: 12.5, color: C.slate }}>{nameOf(dict.subjects, t.subject_id)}</div>
+                  <div style={{ fontSize: 12.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.subjectsText || 'Преподаватель'}</div>
                 </div>
                 <ChevronRight size={18} color={C.faint} />
               </div>
               <div className="rowflex" style={{ gap: 0, borderTop: `1px solid ${C.line}`, paddingTop: 13 }}>
                 <MiniStat value={t.hours} label="уроков" tint={C.brand} />
-                <MiniStat value={t.count} label="уроков" tint={C.ink} />
                 <MiniStat value={t.groups} label="групп" tint={C.ink} />
+                <MiniStat value={t.noPlan} label="без плана" tint={t.noPlan > 0 ? C.warn : C.ink} />
               </div>
-              {t.noPlan > 0 && (
-                <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600, color: C.warn, background: C.warnSoft, padding: '5px 10px', borderRadius: 8, textAlign: 'center' }}>
-                  {t.noPlan} без плана
-                </div>
-              )}
             </button>
           ))}
         </div>
@@ -244,8 +245,8 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
           </button>
         </div>
         <div className="rowflex" style={{ gap: 24, marginTop: 20, flexWrap: 'wrap' }}>
-          <BigNum value={hours} label="уроков за период" />
-          <BigNum value={done.length} label="уроков" />
+          <BigNum value={hours} label="уроков всего" />
+          <BigNum value={done.length} label="записей" />
           <BigNum value={byGroup.length} label="групп" />
           <BigNum value={noPlan} label="без плана" warn={noPlan > 0} />
         </div>
@@ -253,7 +254,7 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
 
       {byGroup.length > 0 && (
         <>
-          <h2 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 800 }}>Часы по группам</h2>
+          <h2 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 800 }}>Уроки по группам</h2>
           <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 24 }}>
             {byGroup.map((g, i) => {
               const pct = (g.hours / byGroup[0].hours) * 100

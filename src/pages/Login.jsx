@@ -10,10 +10,10 @@ const L = {
 }
 
 const FEATURES = [
-  { icon: Video, title: 'Учёт уроков', sub: 'Дата, время, группа, тема' },
-  { icon: ClipboardList, title: 'Планы уроков', sub: 'Файл плана к каждому занятию' },
-  { icon: LineChart, title: 'Подсчёт часов', sub: 'Автоматически по каждому учителю' },
-  { icon: ShieldCheck, title: 'Контроль завуча', sub: 'Полная сводка по преподавателям' },
+  { icon: Video, title: 'Журнал уроков', sub: 'Дата, группа, тема, количество' },
+  { icon: ClipboardList, title: 'Планы занятий', sub: 'Файл плана к каждому уроку' },
+  { icon: LineChart, title: 'Учёт нагрузки', sub: 'Уроки по каждому преподавателю' },
+  { icon: ShieldCheck, title: 'Посещаемость', sub: 'Контроль по группам и ученикам' },
 ]
 
 export default function Login() {
@@ -59,8 +59,8 @@ export default function Login() {
           <div style={{ fontSize: 11, letterSpacing: 2, color: L.faint, marginTop: 2 }}>СИСТЕМА УЧЁТА УРОКОВ</div>
         </div>
         <nav className="lp-nav-links" style={{ margin: '0 auto' }}>
-          {['Возможности', 'Преподаватели', 'Отчёты', 'Контроль'].map((x) => (
-            <a key={x} href="#" style={{ color: L.mute, textDecoration: 'none', fontSize: 15, fontWeight: 500 }}>{x}</a>
+          {['Журнал', 'Преподаватели', 'Посещаемость', 'Отчёты'].map((x) => (
+            <span key={x} style={{ color: L.mute, fontSize: 15, fontWeight: 500 }}>{x}</span>
           ))}
         </nav>
         <span className="lp-phone" style={{ color: L.white, fontWeight: 700, fontSize: 15 }}>+7 705 357 ···</span>
@@ -70,21 +70,21 @@ export default function Login() {
         <div>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: `1px solid ${L.navy3}`, background: 'rgba(76,195,224,.08)', padding: '8px 16px', borderRadius: 30, marginBottom: 26 }}>
             <span style={{ width: 8, height: 8, borderRadius: 4, background: L.cyan }} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: L.cyan }}>Онлайн-центр «Лидер+» · внутренняя система</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: L.cyan }}>Образовательный центр «Лидер+» · Павлодар</span>
           </div>
-          <h1 className="lp-h1">Учёт работы<br />преподавателей <span style={{ color: L.orange }}>без Excel</span></h1>
+          <h1 className="lp-h1">Единый журнал<br />работы <span style={{ color: L.orange }}>центра</span></h1>
           <p style={{ fontSize: 18, lineHeight: 1.55, color: L.mute, maxWidth: 540, margin: '26px 0 34px' }}>
-            Учителя вносят проведённые уроки и прикрепляют планы, а завуч в один клик видит отработанные часы по каждому преподавателю и группе — за любой период.
+            Преподаватели ведут уроки и отмечают посещаемость, а руководство видит полную картину нагрузки и явки — по каждому офису, группе и ученику, за любой период.
           </p>
           <div className="lp-stats" style={{ marginTop: 10 }}>
             {[
-              { n: '2', hi: '', l: 'роли: учитель и завуч' },
-              { n: '1', hi: '', l: 'клик до отчёта в Excel' },
-              { n: '0', hi: '', l: 'ручных таблиц' },
+              { n: '3', hi: '', l: 'офиса: Маргулана, Усолка, Торайгырова' },
+              { n: '2', hi: '', l: 'языка обучения: каз и рус' },
+              { n: '1', hi: '', l: 'журнал вместо десятков таблиц' },
             ].map((s, i) => (
               <div key={i} style={{ paddingRight: 30, marginRight: 30, borderRight: i < 2 ? `1px solid ${L.navy3}` : 'none' }}>
                 <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: -1 }}>{s.n}<span style={{ color: L.cyan }}>{s.hi}</span></div>
-                <div style={{ fontSize: 14, color: L.faint, marginTop: 4, maxWidth: 130 }}>{s.l}</div>
+                <div style={{ fontSize: 14, color: L.faint, marginTop: 4, maxWidth: 150 }}>{s.l}</div>
               </div>
             ))}
           </div>
@@ -97,8 +97,8 @@ export default function Login() {
               <GraduationCap size={22} color="#fff" />
             </div>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>Вход в кабинет</div>
-              <div style={{ fontSize: 13, color: '#7a86a3' }}>Для преподавателей и завуча</div>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>Вход в систему</div>
+              <div style={{ fontSize: 13, color: '#7a86a3' }}>Для сотрудников центра «Лидер+»</div>
             </div>
           </div>
 

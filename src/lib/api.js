@@ -2,19 +2,26 @@ import { supabase } from './supabase'
 
 // ---------- СПРАВОЧНИКИ ----------
 export async function fetchDictionaries() {
-  const [subjects, groups, teachers, assistants] = await Promise.all([
+  const [subjects, groups, teachers, assistants, tSubjects] = await Promise.all([
     supabase.from('subjects').select('*').order('name'),
     supabase.from('groups').select('*').eq('archived', false).order('name'),
     supabase.from('teachers').select('*').eq('archived', false).order('full_name'),
     supabase.from('assistants').select('*').eq('archived', false).order('full_name'),
+    supabase.from('teacher_subjects').select('teacher_id, subject_id'),
   ])
-  const err = subjects.error || groups.error || teachers.error || assistants.error
+  const err = subjects.error || groups.error || teachers.error || assistants.error || tSubjects.error
   if (err) throw err
+  // карта: teacher_id -> [subject_id, ...]
+  const subjectsByTeacher = {}
+  ;(tSubjects.data || []).forEach((r) => {
+    (subjectsByTeacher[r.teacher_id] ||= []).push(r.subject_id)
+  })
   return {
     subjects: subjects.data,
     groups: groups.data,
     teachers: teachers.data,
     assistants: assistants.data,
+    subjectsByTeacher,
   }
 }
 
