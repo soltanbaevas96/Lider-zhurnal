@@ -202,7 +202,7 @@ export async function fetchStudentsOfGroup(groupId) {
 export async function fetchAttendance(lessonId) {
   const { data, error } = await supabase
     .from('attendance')
-    .select('student_id, present')
+    .select('student_id, present, absence_reason')
     .eq('lesson_id', lessonId)
   if (error) throw error
   return data
@@ -212,7 +212,12 @@ export async function fetchAttendance(lessonId) {
 export async function saveAttendance(lessonId, records) {
   await supabase.from('attendance').delete().eq('lesson_id', lessonId)
   if (records.length) {
-    const rows = records.map((r) => ({ lesson_id: lessonId, student_id: r.student_id, present: r.present }))
+    const rows = records.map((r) => ({
+      lesson_id: lessonId,
+      student_id: r.student_id,
+      present: r.present,
+      absence_reason: r.present ? null : (r.absence_reason || null),
+    }))
     const { error } = await supabase.from('attendance').insert(rows)
     if (error) throw error
   }
@@ -307,7 +312,7 @@ export async function fetchTimesheetData(period) {
   let attendance = []
   if (lessonIds.length) {
     const { data: att, error: ae } = await supabase
-      .from('attendance').select('lesson_id, student_id, present')
+      .from('attendance').select('lesson_id, student_id, present, absence_reason')
       .in('lesson_id', lessonIds)
     if (ae) throw ae
     attendance = att
@@ -319,4 +324,168 @@ export async function fetchTimesheetData(period) {
   if (lke) throw lke
 
   return { lessons, attendance, studentGroups: links }
+}
+
+// ---------- АНАЛИТИКА: КАРТОЧКА УЧЕНИКА ----------
+// Календарь ученика за месяц ('YYYY-MM') — все занятия его групп с отметкой присутствия
+export async function fetchStudentCalendar(studentId, month) {
+  const { data, error } = await supabase.rpc('get_student_calendar', {
+    p_student_id: studentId, p_month: month,
+  })
+  if (error) throw error
+  return data || []
+}
+
+// Сводка ученика за период
+export async function fetchStudentSummary(studentId, from, to) {
+  const { data, error } = await supabase.rpc('get_student_summary', {
+    p_student_id: studentId, p_from: from || null, p_to: to || null,
+  })
+  if (error) throw error
+  return data?.[0] || { total: 0, present: 0, absent: 0, pct: 0, max_streak: 0, last_lesson_date: null }
+}
+
+// Группы ученика с метриками за период
+export async function fetchStudentGroupsStats(studentId, from, to) {
+  const { data, error } = await supabase.rpc('get_student_groups', {
+    p_student_id: studentId, p_from: from || null, p_to: to || null,
+  })
+  if (error) throw error
+  return data || []
+}
+
+// Один ученик со всеми полями
+export async function fetchStudent(studentId) {
+  const { data, error } = await supabase.from('students').select('*').eq('id', studentId).single()
+  if (error) throw error
+  return data
+}
+
+// ---------- РИСКИ ----------
+// Ученики с флагами риска (status = attention | risk)
+export async function fetchRiskStudents() {
+  const { data, error } = await supabase.from('students')
+    .select('*')
+    .in('status', ['attention', 'risk'])
+    .eq('archived', false)
+    .order('status', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+// Пересчитать флаги риска (RPC)
+export async function recalcRiskFlags() {
+  const { data, error } = await supabase.rpc('recalc_risk_flags')
+  if (error) throw error
+  return data
+}
+
+// Зафиксировать контакт с родителем
+export async function saveContact(studentId, note) {
+  const { error } = await supabase.from('students')
+    .update({ last_contact_at: new Date().toISOString(), last_contact_note: note })
+    .eq('id', studentId)
+  if (error) throw error
+  // событие в ленту
+  await supabase.from('student_events').insert({
+    student_id: studentId, event_type: 'contact', payload: { note },
+  })
+}
+
+// Лента событий ученика
+export async function fetchStudentEvents(studentId) {
+  const { data, error } = await supabase.from('student_events')
+    .select('*').eq('student_id', studentId)
+    .order('created_at', { ascending: false }).limit(50)
+  if (error) throw error
+  return data || []
+}
+
+// ---------- ДАШБОРД ----------
+// Сырые данные за период для расчёта KPI и графиков на клиенте.
+export async function fetchDashboardData(period) {
+  let lq = supabase.from('lessons')
+    .select('id, group_id, teacher_id, lesson_date, status, lessons_count, plan_path')
+  if (period?.from) lq = lq.gte('lesson_date', period.from)
+  if (period?.to) lq = lq.lte('lesson_date', period.to)
+  const { data: lessons, error: le } = await lq
+  if (le) throw le
+
+  const ids = lessons.map((l) => l.id)
+  let attendance = []
+  if (ids.length) {
+    const { data: att, error: ae } = await supabase
+      .from('attendance').select('lesson_id, student_id, present, absence_reason')
+      .in('lesson_id', ids)
+    if (ae) throw ae
+    attendance = att
+  }
+
+  const [{ data: groups }, { data: students }, { data: links }] = await Promise.all([
+    supabase.from('groups').select('id, name, office, lang, subject_name, capacity').eq('archived', false),
+    supabase.from('students').select('id, full_name, status, office, lang').eq('archived', false),
+    supabase.from('student_groups').select('student_id, group_id'),
+  ])
+
+  return { lessons, attendance, groups: groups || [], students: students || [], studentGroups: links || [] }
+}
+
+// ---------- АНАЛИТИКА: ГРУППЫ / ПРЕПОДАВАТЕЛИ / ПРЕДМЕТЫ ----------
+export async function fetchGroupsAnalytics(from, to) {
+  const { data, error } = await supabase.rpc('get_groups_analytics', { p_from: from || null, p_to: to || null })
+  if (error) throw error
+  return data || []
+}
+export async function fetchTeachersAnalytics(from, to) {
+  const { data, error } = await supabase.rpc('get_teachers_analytics', { p_from: from || null, p_to: to || null })
+  if (error) throw error
+  return data || []
+}
+export async function fetchSubjectsAnalytics(from, to) {
+  const { data, error } = await supabase.rpc('get_subjects_analytics', { p_from: from || null, p_to: to || null })
+  if (error) throw error
+  return data || []
+}
+
+// ---------- ПОИСК ----------
+export async function globalSearch(query) {
+  if (!query || query.trim().length < 2) return []
+  const { data, error } = await supabase.rpc('global_search', { p_query: query.trim() })
+  if (error) throw error
+  return data || []
+}
+
+// ---------- УВЕДОМЛЕНИЯ ----------
+export async function fetchNotifications() {
+  const { data, error } = await supabase.rpc('get_notifications')
+  if (error) throw error
+  return data || []
+}
+
+// ---------- ЖУРНАЛ ОБЩЕНИЯ ----------
+export async function fetchCommunications(studentId) {
+  const { data, error } = await supabase.from('communications')
+    .select('*').eq('student_id', studentId).order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+export async function addCommunication(studentId, kind, note, result, authorName) {
+  const { error } = await supabase.from('communications').insert({
+    student_id: studentId, kind, note, result, author_name: authorName || null,
+  })
+  if (error) throw error
+}
+
+// ---------- ЛОГИ ----------
+export async function fetchAuditLog(limit = 100) {
+  const { data, error } = await supabase.from('audit_log')
+    .select('*').order('created_at', { ascending: false }).limit(limit)
+  if (error) throw error
+  return data || []
+}
+
+// ---------- ОБНОВЛЕНИЕ УЧЕНИКА (статусы, заморозка, уход) ----------
+export async function updateStudentStatus(id, patch) {
+  const { error } = await supabase.from('students').update(patch).eq('id', id)
+  if (error) throw error
 }

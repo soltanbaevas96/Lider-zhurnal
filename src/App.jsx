@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { GraduationCap, LogOut, Settings, FileSpreadsheet } from 'lucide-react'
+import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3 } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, periodRange, periodLabelOf } from './lib/utils'
@@ -9,9 +9,14 @@ import TeacherCabinet from './pages/TeacherCabinet'
 import AdminCabinet from './pages/AdminCabinet'
 import Manage from './pages/Manage'
 import Timesheets from './pages/Timesheets'
+import Dashboard from './pages/Dashboard'
+import Risks from './pages/Risks'
+import StudentCard from './pages/StudentCard'
+import Analytics from './pages/Analytics'
+import GlobalSearch from './components/GlobalSearch'
 
 export default function App() {
-  const { session, profile, teacher, isAdmin, loading, signOut } = useAuth()
+  const { session, profile, teacher, isAdmin, isDirector, isManager, loading, signOut } = useAuth()
 
   const [dict, setDict] = useState(null)
   const [fullDict, setFullDict] = useState(null) // включая архивные, для управления
@@ -19,7 +24,8 @@ export default function App() {
   const [period, setPeriod] = useState({ mode: 'month', month: monthOptions(1)[0].v }) // текущий месяц
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState('')
-  const [view, setView] = useState('cabinet') // cabinet | manage
+  const [view, setView] = useState('cabinet') // cabinet | dashboard | risks | timesheets | manage | student
+  const [openStudent, setOpenStudent] = useState(null) // id ученика для карточки
 
   const periodLabel = useMemo(() => periodLabelOf(period), [period])
 
@@ -120,38 +126,58 @@ export default function App() {
             <div>
               <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1, letterSpacing: -0.3 }}>Лидер Плюс</div>
               <div style={{ fontSize: 12, color: C.slate, marginTop: 3 }}>
-                {isAdmin ? 'Кабинет завуча' : 'Кабинет преподавателя'}
+                {isDirector ? 'Кабинет директора' : isAdmin ? 'Кабинет завуча' : 'Кабинет преподавателя'}
               </div>
             </div>
           </div>
           <div className="rowflex" style={{ marginLeft: 'auto', gap: 12 }}>
+            {isManager && <GlobalSearch onOpenStudent={(id) => { setOpenStudent(id) }} />}
             <span className="hide-sm" style={{ fontSize: 13, color: C.slate }}>{profile?.full_name}</span>
-            {isAdmin && (
-              <button
-                onClick={() => setView(view === 'timesheets' ? 'cabinet' : 'timesheets')}
-                className="rowflex" title="Табели для зарплаты и посещаемости"
-                style={{ gap: 6, padding: '8px 13px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: view === 'timesheets' ? C.brand : C.slate, background: view === 'timesheets' ? C.brandSoft : C.grey, border: 'none', cursor: 'pointer' }}>
-                <FileSpreadsheet size={15} /> <span className="hide-sm">Табели</span>
-              </button>
-            )}
-            {isAdmin && (
-              <button
-                onClick={async () => {
-                  if (view === 'manage') { setView('cabinet'); return }
-                  if (!fullDict) { try { await reloadFullDict() } catch (e) { setError(e.message) } }
-                  setView('manage')
-                }}
-                className="rowflex" title="Управление справочниками"
-                style={{ gap: 6, padding: '8px 13px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: view === 'manage' ? C.brand : C.slate, background: view === 'manage' ? C.brandSoft : C.grey, border: 'none', cursor: 'pointer' }}>
-                <Settings size={15} /> <span className="hide-sm">Управление</span>
-              </button>
-            )}
             <button onClick={signOut} className="rowflex" title="Выйти"
               style={{ gap: 6, padding: '8px 13px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}>
               <LogOut size={15} /> <span className="hide-sm">Выйти</span>
             </button>
           </div>
         </div>
+
+        {/* Навигация завуча */}
+        {isManager && (
+          <div className="wrap" style={{ paddingBottom: 0 }}>
+            <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2 }}>
+              {[
+                { k: 'dashboard', t: 'Дашборд', icon: LayoutDashboard },
+                { k: 'cabinet', t: 'Сводка', icon: GraduationCap },
+                { k: 'analytics', t: 'Аналитика', icon: BarChart3 },
+                { k: 'risks', t: 'Риски', icon: AlertTriangle },
+                { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
+                ...(isAdmin ? [{ k: 'manage', t: 'Управление', icon: Settings }] : []),
+              ].map((o) => {
+                const on = view === o.k
+                const Icon = o.icon
+                return (
+                  <button key={o.k}
+                    onClick={async () => {
+                      setOpenStudent(null)
+                      if (o.k === 'manage' && !fullDict) {
+                        try { await reloadFullDict() } catch (e) { setError(e.message) }
+                      }
+                      setView(o.k)
+                    }}
+                    className="rowflex"
+                    style={{
+                      gap: 6, padding: '9px 14px', borderRadius: '9px 9px 0 0', fontSize: 13, fontWeight: 700,
+                      whiteSpace: 'nowrap', border: 'none', cursor: 'pointer',
+                      color: on ? C.brand : C.slate,
+                      background: on ? C.card : 'transparent',
+                      borderBottom: on ? `2px solid ${C.brand}` : '2px solid transparent',
+                    }}>
+                    <Icon size={15} /> {o.t}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="wrap" style={{ padding: '20px 16px 64px' }}>
@@ -159,8 +185,16 @@ export default function App() {
 
         {!dict ? (
           <Spinner label="Загрузка данных…" />
-        ) : isAdmin && view === 'timesheets' ? (
-          <Timesheets dict={dict} />
+        ) : openStudent ? (
+          <StudentCard studentId={openStudent} onBack={() => setOpenStudent(null)} />
+        ) : isManager && view === 'dashboard' ? (
+          <Dashboard onOpenRisks={() => setView('risks')} />
+        ) : isManager && view === 'analytics' ? (
+          <Analytics onOpenStudent={(id) => setOpenStudent(id)} />
+        ) : isManager && view === 'risks' ? (
+          <Risks onOpenStudent={(id) => setOpenStudent(id)} />
+        ) : isManager && view === 'timesheets' ? (
+          <Timesheets dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isAdmin && view === 'manage' ? (
           !fullDict ? (
             <Spinner label="Загрузка справочников…" />
@@ -170,9 +204,10 @@ export default function App() {
               subjects={fullDict.subjects}
               onBack={() => setView('cabinet')}
               onChanged={reloadAllDicts}
+              onOpenStudent={(id) => setOpenStudent(id)}
             />
           )
-        ) : isAdmin ? (
+        ) : isManager ? (
           <AdminCabinet dict={dict} lessons={lessons} period={period} setPeriod={setPeriod} periodLabel={periodLabel}
             onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
         ) : teacher ? (

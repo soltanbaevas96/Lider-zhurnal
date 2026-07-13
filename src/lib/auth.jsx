@@ -50,9 +50,12 @@ export function AuthProvider({ children }) {
   const signOut = () => supabase.auth.signOut()
 
   const isAdmin = profile?.role === 'admin'
+  const isDirector = profile?.role === 'director'
+  // Директор и завуч видят управленческие разделы. Директор — без правки справочников.
+  const isManager = isAdmin || isDirector
 
   return (
-    <AuthCtx.Provider value={{ session, profile, teacher, isAdmin, loading, signIn, signOut }}>
+    <AuthCtx.Provider value={{ session, profile, teacher, isAdmin, isDirector, isManager, loading, signIn, signOut }}>
       {children}
     </AuthCtx.Provider>
   )

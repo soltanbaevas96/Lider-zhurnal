@@ -12,7 +12,7 @@ import {
   addStudentToGroup, removeStudentFromGroup, fetchAllStudents,
 } from '../lib/api'
 
-export default function Manage({ dict, subjects, onBack, onChanged }) {
+export default function Manage({ dict, subjects, onBack, onChanged, onOpenStudent }) {
   const [tab, setTab] = useState('teachers')
   const [showArchived, setShowArchived] = useState(false)
   const [modal, setModal] = useState(null) // { kind, row? }
@@ -123,7 +123,7 @@ export default function Manage({ dict, subjects, onBack, onChanged }) {
       </div>
 
       {tab === 'students' ? (
-        <StudentsManage groups={(dict.groups || []).filter((g) => !g.archived)} />
+        <StudentsManage groups={(dict.groups || []).filter((g) => !g.archived)} onOpenStudent={onOpenStudent} />
       ) : (
       <>
       {tab === 'groups' && (
@@ -458,7 +458,7 @@ function LinkModal({ teacher, groups, subjects, onClose, onDone }) {
 }
 
 // ---------- РАЗДЕЛ УЧЕНИКОВ ----------
-function StudentsManage({ groups }) {
+function StudentsManage({ groups, onOpenStudent }) {
   const [students, setStudents] = useState(null)
   const [modal, setModal] = useState(null) // { row } | 'new'
   const [q, setQ] = useState('')
@@ -492,7 +492,10 @@ function StudentsManage({ groups }) {
       render: (s) => (
         <div className="rowflex" style={{ gap: 10 }}>
           <div className="av" style={{ width: 30, height: 30, fontSize: 12, background: avColorByIndex(s._i || 0) }}>{initials(s.full_name)}</div>
-          <span style={{ fontWeight: 600 }}>{s.full_name}</span>
+          <span onClick={(e) => { if (onOpenStudent) { e.stopPropagation(); onOpenStudent(s.id) } }}
+            style={{ fontWeight: 600, color: onOpenStudent ? C.brand : C.ink, cursor: onOpenStudent ? 'pointer' : 'default' }}>
+            {s.full_name}
+          </span>
         </div>
       ),
     },

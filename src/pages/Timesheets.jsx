@@ -5,7 +5,7 @@ import { fetchTimesheetData } from '../lib/api'
 import { C, nameOf, lessonCount, subjectOf, fmtDate, periodRange, periodLabelOf } from '../lib/utils'
 import PeriodPicker from '../components/PeriodPicker'
 
-export default function Timesheets({ dict }) {
+export default function Timesheets({ dict, onOpenStudent }) {
   const [tab, setTab] = useState('teachers') // teachers | students
   const [period, setPeriod] = useState({ mode: 'month', month: new Date().toISOString().slice(0, 7) })
   const [data, setData] = useState(null)
@@ -171,7 +171,7 @@ export default function Timesheets({ dict }) {
       ) : tab === 'teachers' ? (
         <TeacherTimesheet rows={teacherRows} total={teacherTotal} />
       ) : (
-        <StudentTimesheet rows={studentRows} />
+        <StudentTimesheet rows={studentRows} onOpenStudent={onOpenStudent} />
       )}
     </div>
   )
@@ -210,7 +210,7 @@ function TeacherTimesheet({ rows, total }) {
 }
 
 // ---------- СВОДНАЯ ПО УЧЕНИКАМ ----------
-function StudentTimesheet({ rows }) {
+function StudentTimesheet({ rows, onOpenStudent }) {
   const [open, setOpen] = useState(null)
   if (!rows.length) return <Empty text="За этот период нет данных по ученикам." />
   const pctColor = (p) => p >= 85 ? C.ok : p >= 65 ? '#d97706' : '#dc2626'
@@ -225,7 +225,7 @@ function StudentTimesheet({ rows }) {
               <div onClick={() => setOpen(isOpen ? null : r.id)} className="rowflex"
                 style={{ padding: '12px 16px', cursor: 'pointer', gap: 12 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{r.name}</div>
+                  <div onClick={(e) => { if (onOpenStudent) { e.stopPropagation(); onOpenStudent(r.id) } }} style={{ fontSize: 14, fontWeight: 600, color: onOpenStudent ? C.brand : C.ink, cursor: onOpenStudent ? "pointer" : "default" }}>{r.name}</div>
                   <div style={{ fontSize: 12, color: C.slate }}>
                     было {r.total} · посетил {r.present} · пропустил {r.absent}
                   </div>
