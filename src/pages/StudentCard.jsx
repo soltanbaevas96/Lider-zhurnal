@@ -84,7 +84,18 @@ export default function StudentCard({ studentId, onBack }) {
   }
 
   if (loading && !student) return <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
-  if (!student) return <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Ученик не найден</div>
+  if (!student) return (
+    <div style={{ padding: 40, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Ученик не найден</div>
+      <div style={{ fontSize: 13, color: C.slate, marginBottom: 16 }}>
+        Возможно, он был удалён или архивирован.
+      </div>
+      <button onClick={onBack}
+        style={{ padding: '10px 20px', borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+        Вернуться
+      </button>
+    </div>
+  )
 
   const st = STATUS[student.status] || STATUS.active
 

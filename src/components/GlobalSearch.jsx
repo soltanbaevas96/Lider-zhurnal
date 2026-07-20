@@ -59,7 +59,7 @@ export default function GlobalSearch({ onOpenStudent }) {
           )}
           {results.map((r, i) => {
             const Icon = ICONS[r.kind] || User
-            const clickable = r.kind === 'student' && onOpenStudent
+            const clickable = r.kind === 'student' && r.id && onOpenStudent
             return (
               <button key={i} disabled={!clickable}
                 onClick={() => { if (clickable) { onOpenStudent(r.id); setOpen(false); setQ('') } }}

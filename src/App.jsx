@@ -1,540 +1,260 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import {
-  ArrowLeft, Phone, User, CalendarDays, List, ChevronLeft, ChevronRight,
-  TrendingUp, TrendingDown, AlertTriangle, Download, School, MessageCircle, Plus,
-} from 'lucide-react'
-import * as XLSX from 'xlsx'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-} from 'recharts'
-import {
-  fetchStudent, fetchStudentCalendar, fetchStudentSummary, fetchStudentGroupsStats, fetchStudentEvents,
-  fetchCommunications, addCommunication,
-} from '../lib/api'
-import { C, fmtDate } from '../lib/utils'
-import DataTable from '../components/DataTable'
+import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock } from 'lucide-react'
+import { useAuth } from './lib/auth'
+import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
+import { C, monthOptions, periodRange, periodLabelOf } from './lib/utils'
+import { Spinner } from './components/ui'
+import Login from './pages/Login'
+import TeacherCabinet from './pages/TeacherCabinet'
+import AdminCabinet from './pages/AdminCabinet'
+import Manage from './pages/Manage'
+import Timesheets from './pages/Timesheets'
+import Dashboard from './pages/Dashboard'
+import Risks from './pages/Risks'
+import StudentCard from './pages/StudentCard'
+import Analytics from './pages/Analytics'
+import Payroll from './pages/Payroll'
+import Schedule from './pages/Schedule'
+import MyLessons from './pages/MyLessons'
+import GlobalSearch from './components/GlobalSearch'
 
-const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
-const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+export default function App() {
+  const { session, profile, teacher, isAdmin, isDirector, isManager, loading, signOut } = useAuth()
 
-const STATUS = {
-  active:    { label: 'Активен',      color: C.ok,     bg: C.okSoft },
-  attention: { label: 'Внимание',     color: '#d97706', bg: '#fef3c7' },
-  risk:      { label: 'Риск оттока',  color: '#dc2626', bg: '#fee2e2' },
-  churned:   { label: 'Ушёл',         color: C.slate,  bg: C.grey },
-  archived:  { label: 'Архив',        color: C.slate,  bg: C.grey },
-}
+  const [dict, setDict] = useState(null)
+  const [fullDict, setFullDict] = useState(null) // включая архивные, для управления
+  const [lessons, setLessons] = useState([])
+  const [period, setPeriod] = useState({ mode: 'month', month: monthOptions(1)[0].v }) // текущий месяц
+  const [dataLoading, setDataLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [view, setView] = useState('cabinet') // cabinet | dashboard | risks | timesheets | manage | student
+  const [openStudent, setOpenStudent] = useState(null) // id ученика для карточки
 
-export default function StudentCard({ studentId, onBack }) {
-  const [student, setStudent] = useState(null)
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
-  const [calendar, setCalendar] = useState([])
-  const [summary, setSummary] = useState(null)
-  const [groups, setGroups] = useState([])
-  const [events, setEvents] = useState([])
-  const [comms, setComms] = useState([])
-  const [addComm, setAddComm] = useState(false)
-  const [view, setView] = useState('calendar') // calendar | list
-  const [loading, setLoading] = useState(true)
+  const periodLabel = useMemo(() => periodLabelOf(period), [period])
 
-  // период = выбранный месяц
-  const range = useMemo(() => {
-    const [y, m] = month.split('-').map(Number)
-    const from = `${month}-01`
-    const last = new Date(y, m, 0).getDate()
-    return { from, to: `${month}-${String(last).padStart(2, '0')}` }
-  }, [month])
+  // Загрузка активных справочников (для форм и отчётов)
+  async function reloadDict() {
+    const d = await fetchDictionaries()
+    setDict(d)
+  }
+  // Загрузка полных справочников (для раздела управления)
+  async function reloadFullDict() {
+    const d = await fetchAllDictionaries()
+    setFullDict(d)
+  }
+  async function reloadAllDicts() {
+    await Promise.all([reloadDict(), reloadFullDict()])
+  }
 
+  async function reloadLessons() {
+    return fetchLessons(periodRange(period)).then(setLessons)
+  }
+
+  // Загрузка справочников при входе
   useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      fetchStudent(studentId),
-      fetchStudentCalendar(studentId, month),
-      fetchStudentSummary(studentId, range.from, range.to),
-      fetchStudentGroupsStats(studentId, range.from, range.to),
-      fetchStudentEvents(studentId).catch(() => []),
-      fetchCommunications(studentId).catch(() => []),
-    ])
-      .then(([st, cal, sum, grp, ev, cm]) => {
-        setStudent(st); setCalendar(cal); setSummary(sum); setGroups(grp); setEvents(ev); setComms(cm)
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [studentId, month, range.from, range.to])
+    if (!session) return
+    reloadDict().catch((e) => setError(e.message))
+  }, [session])
 
-  const shiftMonth = (d) => {
-    const [y, m] = month.split('-').map(Number)
-    const dt = new Date(y, m - 1 + d, 1)
-    setMonth(dt.toISOString().slice(0, 7))
-  }
+  // Загрузка уроков при смене периода
+  useEffect(() => {
+    if (!session) return
+    setDataLoading(true)
+    fetchLessons(periodRange(period))
+      .then(setLessons)
+      .catch((e) => setError(e.message))
+      .finally(() => setDataLoading(false))
+  }, [session, period])
 
-  function exportList() {
-    const rows = calendar.map((l) => ({
-      'Дата': l.lesson_date,
-      'Предмет': l.subject_name || '',
-      'Группа': l.group_name || '',
-      'Преподаватель': l.teacher_name || '',
-      'Статус': l.present ? 'был' : 'пропуск',
-      'Причина': l.absence_reason || '',
-      'Комментарий': l.comment || '',
-    }))
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Посещаемость')
-    XLSX.writeFile(wb, `${(student?.full_name || 'ученик').replace(/\s/g, '_')}_${month}.xlsx`)
-  }
+  const onLessonAdded = (l) => setLessons((prev) => [l, ...prev])
+  const onLessonChanged = (l) => setLessons((prev) => prev.map((x) => x.id === l.id ? l : x))
+  const onLessonDeleted = (id) => setLessons((prev) => prev.filter((x) => x.id !== id))
 
-  if (loading && !student) return <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
-  if (!student) return <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Ученик не найден</div>
-
-  const st = STATUS[student.status] || STATUS.active
+  if (loading) return <FullScreen><Spinner label="Проверка сессии…" /></FullScreen>
+  if (!session) return <Login />
 
   return (
-    <div>
-      <button onClick={onBack} className="rowflex"
-        style={{ gap: 6, marginBottom: 14, background: 'none', border: 'none', color: C.slate, fontSize: 13.5, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
-        <ArrowLeft size={16} /> Назад
-      </button>
+    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter',system-ui,sans-serif", color: C.ink }}>
+      <style>{`
+        *{box-sizing:border-box;} button{font-family:inherit;}
+        input,select{font-family:inherit;}
+        .wrap{max-width:1320px;margin:0 auto;padding:0 18px;}
+        .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+        .tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
+        .rowflex{display:flex;align-items:center;gap:12px;}
+        @media(max-width:680px){ .stats{grid-template-columns:1fr 1fr;} .hide-sm{display:none!important;} }
+        .card-hover{transition:transform .15s ease, box-shadow .15s ease;}
+        .card-hover:hover{transform:translateY(-3px);box-shadow:0 10px 24px rgba(67,56,202,.13);}
+        .lrow:hover{background:#faf9ff;}
 
-      {/* ---------- ШАПКА ---------- */}
-      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
-        <div className="rowflex" style={{ gap: 14, flexWrap: 'wrap', marginBottom: 14 }}>
-          <div>
-            <div className="rowflex" style={{ gap: 9 }}>
-              <h1 style={{ margin: 0, fontSize: 21, fontWeight: 800, letterSpacing: -0.4 }}>{student.full_name}</h1>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: st.color, background: st.bg, padding: '3px 10px', borderRadius: 20 }}>
-                {st.label}
-              </span>
+        /* ---------- ПЛОТНЫЕ ТАБЛИЦЫ ---------- */
+        .dt{width:100%;border-collapse:collapse;font-size:13px;}
+        .dt thead th{position:sticky;top:0;background:#f7f7fb;text-align:left;font-size:11.5px;font-weight:700;
+          color:#6b7194;text-transform:uppercase;letter-spacing:.03em;padding:9px 12px;border-bottom:1px solid #e8e9f3;
+          white-space:nowrap;user-select:none;}
+        .dt thead th.sortable{cursor:pointer;}
+        .dt thead th.sortable:hover{color:#4338ca;}
+        .dt tbody td{padding:9px 12px;border-bottom:1px solid #f0f1f7;vertical-align:middle;}
+        .dt tbody tr{transition:background .1s;}
+        .dt tbody tr:hover{background:#faf9ff;cursor:pointer;}
+        .dt tbody tr:last-child td{border-bottom:none;}
+        .dt .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;}
+        .dt-wrap{background:#fff;border:1px solid #e8e9f3;border-radius:12px;overflow:hidden;}
+        .dt-scroll{max-height:none;overflow:auto;}
+
+        /* компактные бейджи и чипы фильтров */
+        .fbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+        .fchip{padding:6px 12px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid #e8e9f3;background:#fff;color:#6b7194;transition:all .12s;white-space:nowrap;}
+        .fchip:hover{border-color:#c9cbe0;}
+        .fchip.on{background:#4338ca;border-color:#4338ca;color:#fff;}
+        .fseg{display:flex;background:#eef0f6;border-radius:9px;padding:3px;}
+        .fseg button{padding:6px 13px;border-radius:7px;font-size:12.5px;font-weight:700;border:none;cursor:pointer;background:transparent;color:#6b7194;}
+        .fseg button.on{background:#fff;color:#4338ca;box-shadow:0 1px 3px rgba(20,24,58,.12);}
+        .search-box{flex:1;min-width:180px;position:relative;}
+        .search-box input{width:100%;padding:8px 12px 8px 34px;border:1px solid #e8e9f3;border-radius:9px;font-size:13px;outline:none;background:#fff;}
+        .search-box input:focus{border-color:#4338ca;}
+        .pager{display:flex;align-items:center;gap:6px;justify-content:center;padding:12px;}
+        .pager button{min-width:32px;height:32px;border-radius:8px;border:1px solid #e8e9f3;background:#fff;font-size:13px;font-weight:600;color:#6b7194;cursor:pointer;}
+        .pager button.on{background:#4338ca;border-color:#4338ca;color:#fff;}
+        .pager button:disabled{opacity:.4;cursor:default;}
+        .av{border-radius:8px;color:#fff;display:grid;place-items:center;font-weight:700;flex-shrink:0;}
+      `}</style>
+
+      <header style={{ background: C.card, borderBottom: `1px solid ${C.line}`, position: 'sticky', top: 0, zIndex: 20 }}>
+        <div className="wrap rowflex" style={{ padding: '13px 16px', flexWrap: 'wrap' }}>
+          <div className="rowflex" style={{ gap: 11 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 11, background: `linear-gradient(135deg,${C.brand},${C.brand2})`, display: 'grid', placeItems: 'center' }}>
+              <GraduationCap size={23} color="#fff" />
             </div>
-            <div style={{ fontSize: 13, color: C.slate, marginTop: 5 }}>
-              {[student.office, student.lang, student.school && `школа №${student.school}`, student.enrolled_at && `с ${fmtDate(student.enrolled_at)}`]
-                .filter(Boolean).join(' · ')}
-            </div>
-          </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            {student.phone && <Contact icon={Phone} label="Ученик" value={student.phone} />}
-            {student.parent_phone && <Contact icon={User} label={student.parent_name || 'Родитель'} value={student.parent_phone} />}
-          </div>
-        </div>
-
-        {student.risk_reason && (
-          <div className="rowflex" style={{ gap: 8, background: '#fee2e2', color: '#b91c1c', padding: '8px 12px', borderRadius: 9, fontSize: 13, fontWeight: 600, marginBottom: 14 }}>
-            <AlertTriangle size={15} /> {student.risk_reason}
-          </div>
-        )}
-
-        {/* Метрики */}
-        <div className="stats">
-          <Metric value={summary?.pct ?? 0} suffix="%" label="посещаемость" tint={pctColor(summary?.pct ?? 0)} />
-          <Metric value={summary?.total ?? 0} label="занятий было" />
-          <Metric value={summary?.present ?? 0} label="посетил" tint={C.ok} />
-          <Metric value={summary?.absent ?? 0} label="пропустил" tint={summary?.absent > 0 ? '#dc2626' : C.ink} />
-        </div>
-      </div>
-
-      {/* ---------- КАЛЕНДАРЬ / СПИСОК ---------- */}
-      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
-        <div className="rowflex" style={{ marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
-          <div className="fseg">
-            <button className={view === 'calendar' ? 'on' : ''} onClick={() => setView('calendar')}>
-              <CalendarDays size={13} style={{ verticalAlign: -2, marginRight: 4 }} />Календарь
-            </button>
-            <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>
-              <List size={13} style={{ verticalAlign: -2, marginRight: 4 }} />Список
-            </button>
-          </div>
-
-          <div className="rowflex" style={{ gap: 6, marginLeft: 'auto' }}>
-            <button onClick={() => shiftMonth(-1)} style={navBtn}><ChevronLeft size={16} /></button>
-            <span style={{ fontSize: 14, fontWeight: 700, minWidth: 130, textAlign: 'center' }}>
-              {MONTHS[Number(month.slice(5, 7)) - 1]} {month.slice(0, 4)}
-            </span>
-            <button onClick={() => shiftMonth(1)} style={navBtn}><ChevronRight size={16} /></button>
-            <button onClick={() => setMonth(new Date().toISOString().slice(0, 7))}
-              style={{ ...navBtn, width: 'auto', padding: '0 11px', fontSize: 12.5, fontWeight: 600 }}>Текущий</button>
-            {view === 'list' && calendar.length > 0 && (
-              <button onClick={exportList} className="rowflex"
-                style={{ gap: 5, padding: '7px 12px', background: C.ok, color: '#fff', borderRadius: 9, fontSize: 12.5, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-                <Download size={14} /> Excel
-              </button>
-            )}
-          </div>
-        </div>
-
-        {view === 'calendar'
-          ? <Calendar month={month} lessons={calendar} />
-          : <LessonList lessons={calendar} />}
-      </div>
-
-      {/* ---------- ГРУППЫ ---------- */}
-      {groups.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <h2 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 800 }}>Группы ученика</h2>
-          <DataTable
-            columns={[
-              { key: 'group_name', label: 'Группа', render: (g) => <b>{g.group_name}</b> },
-              { key: 'subject_name', label: 'Предмет' },
-              { key: 'teacher_name', label: 'Преподаватель', render: (g) => g.teacher_name || '—' },
-              { key: 'total', label: 'Занятий', num: true },
-              { key: 'present', label: 'Посетил', num: true },
-              { key: 'absent', label: 'Пропустил', num: true, render: (g) => <span style={{ color: g.absent > 0 ? '#dc2626' : C.ink }}>{g.absent}</span> },
-              { key: 'pct', label: '%', num: true, render: (g) => <span style={{ color: pctColor(g.pct), fontWeight: 800 }}>{g.pct}%</span> },
-            ]}
-            rows={groups.map((g) => ({ ...g, id: g.group_id }))}
-            pageSize={15}
-          />
-        </div>
-      )}
-
-      {/* ---------- ДИНАМИКА ---------- */}
-      {calendar.length > 0 && <Dynamics lessons={calendar} />}
-
-      {/* ---------- ЖУРНАЛ ОБЩЕНИЯ ---------- */}
-      <div style={{ marginTop: 14 }}>
-        <div className="rowflex" style={{ marginBottom: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>Журнал общения</h2>
-          <button onClick={() => setAddComm(true)} className="rowflex"
-            style={{ marginLeft: 'auto', gap: 5, padding: '6px 12px', background: C.brandSoft, color: C.brand, borderRadius: 9, fontSize: 12.5, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-            <Plus size={14} /> Добавить
-          </button>
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: comms.length ? 0 : 20 }}>
-          {comms.length === 0 ? (
-            <div style={{ textAlign: 'center', color: C.faint, fontSize: 13 }}>
-              Пока нет записей. Фиксируйте звонки, сообщения и встречи с родителями.
-            </div>
-          ) : comms.map((c, i) => (
-            <div key={c.id} style={{ padding: '11px 14px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
-              <div className="rowflex" style={{ gap: 8, marginBottom: 3 }}>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: COMM_KIND[c.kind]?.color || C.slate, background: COMM_KIND[c.kind]?.bg || C.grey, padding: '2px 8px', borderRadius: 20 }}>
-                  {COMM_KIND[c.kind]?.t || c.kind}
-                </span>
-                {c.result && <span style={{ fontSize: 11.5, color: C.slate }}>{c.result}</span>}
-                <span style={{ marginLeft: 'auto', fontSize: 11.5, color: C.faint }}>
-                  {fmtDate(c.created_at?.slice(0, 10))}
-                </span>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1, letterSpacing: -0.3 }}>Лидер Плюс</div>
+              <div style={{ fontSize: 12, color: C.slate, marginTop: 3 }}>
+                {isDirector ? 'Кабинет директора' : isAdmin ? 'Кабинет завуча' : 'Кабинет преподавателя'}
               </div>
-              {c.note && <div style={{ fontSize: 13.5 }}>{c.note}</div>}
-              {c.author_name && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 2 }}>{c.author_name}</div>}
             </div>
-          ))}
-        </div>
-      </div>
-
-      {addComm && (
-        <CommModal studentId={studentId} onClose={() => setAddComm(false)}
-          onSaved={async () => {
-            setAddComm(false)
-            setComms(await fetchCommunications(studentId).catch(() => []))
-          }} />
-      )}
-
-      {/* ---------- ИСТОРИЯ ---------- */}
-      {events.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <h2 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 800 }}>История</h2>
-          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
-            {events.map((e, i) => (
-              <div key={e.id} className="rowflex" style={{ gap: 10, padding: '7px 0', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
-                <span style={{ fontSize: 12, color: C.faint, minWidth: 90 }}>{fmtDate(e.created_at?.slice(0, 10))}</span>
-                <span style={{ fontSize: 13 }}>{eventLabel(e)}</span>
-              </div>
-            ))}
+          </div>
+          <div className="rowflex" style={{ marginLeft: 'auto', gap: 12 }}>
+            {isManager && <GlobalSearch onOpenStudent={(id) => { setOpenStudent(id) }} />}
+            <span className="hide-sm" style={{ fontSize: 13, color: C.slate }}>{profile?.full_name}</span>
+            <button onClick={signOut} className="rowflex" title="Выйти"
+              style={{ gap: 6, padding: '8px 13px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}>
+              <LogOut size={15} /> <span className="hide-sm">Выйти</span>
+            </button>
           </div>
         </div>
-      )}
-    </div>
-  )
-}
 
-// ---------- КАЛЕНДАРЬ ----------
-function Calendar({ month, lessons }) {
-  const [hover, setHover] = useState(null)
-  const [y, m] = month.split('-').map(Number)
-  const first = new Date(y, m - 1, 1)
-  const daysInMonth = new Date(y, m, 0).getDate()
-  const startWd = (first.getDay() + 6) % 7 // пн = 0
-
-  // занятия по дням
-  const byDay = {}
-  lessons.forEach((l) => {
-    const d = Number(l.lesson_date.slice(8, 10))
-    ;(byDay[d] ||= []).push(l)
-  })
-
-  const cells = []
-  for (let i = 0; i < startWd; i++) cells.push(null)
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
-
-  const todayStr = new Date().toISOString().slice(0, 10)
-
-  return (
-    <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5 }}>
-        {WD.map((w) => (
-          <div key={w} style={{ fontSize: 11, fontWeight: 700, color: C.faint, textAlign: 'center', padding: '4px 0' }}>{w}</div>
-        ))}
-        {cells.map((d, i) => {
-          if (d === null) return <div key={`e${i}`} />
-          const dayLessons = byDay[d] || []
-          const dateStr = `${month}-${String(d).padStart(2, '0')}`
-          const isToday = dateStr === todayStr
-          const hasAbsent = dayLessons.some((l) => !l.present)
-          return (
-            <div key={d}
-              onMouseEnter={() => dayLessons.length && setHover({ d, lessons: dayLessons })}
-              onMouseLeave={() => setHover(null)}
-              onClick={() => dayLessons.length && setHover(hover?.d === d ? null : { d, lessons: dayLessons })}
-              style={{
-                position: 'relative', minHeight: 58, borderRadius: 9, padding: '5px 6px',
-                border: isToday ? `1.5px solid ${C.brand}` : `1px solid ${C.line}`,
-                background: dayLessons.length ? (hasAbsent ? '#fff5f5' : '#f6fdf9') : '#fff',
-                cursor: dayLessons.length ? 'pointer' : 'default',
-              }}>
-              <div style={{ fontSize: 11.5, fontWeight: isToday ? 800 : 600, color: isToday ? C.brand : C.slate }}>{d}</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 4 }}>
-                {dayLessons.map((l, li) => (
-                  <span key={li} title={`${l.subject_name || ''} — ${l.present ? 'был' : 'пропуск'}`}
+        {/* Навигация завуча */}
+        {isManager && (
+          <div className="wrap" style={{ paddingBottom: 0 }}>
+            <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2 }}>
+              {[
+                { k: 'dashboard', t: 'Дашборд', icon: LayoutDashboard },
+                { k: 'cabinet', t: 'Сводка', icon: GraduationCap },
+                { k: 'schedule', t: 'Расписание', icon: CalendarClock },
+                { k: 'analytics', t: 'Аналитика', icon: BarChart3 },
+                { k: 'risks', t: 'Риски', icon: AlertTriangle },
+                { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
+                { k: 'payroll', t: 'Зарплата', icon: Wallet },
+                ...(isAdmin ? [{ k: 'manage', t: 'Управление', icon: Settings }] : []),
+              ].map((o) => {
+                const on = view === o.k
+                const Icon = o.icon
+                return (
+                  <button key={o.k}
+                    onClick={async () => {
+                      setOpenStudent(null)
+                      if (o.k === 'manage' && !fullDict) {
+                        try { await reloadFullDict() } catch (e) { setError(e.message) }
+                      }
+                      setView(o.k)
+                    }}
+                    className="rowflex"
                     style={{
-                      width: 9, height: 9, borderRadius: '50%',
-                      background: l.present ? C.ok : '#dc2626',
-                    }} />
-                ))}
-              </div>
-
-              {hover?.d === d && (
-                <div style={{
-                  position: 'absolute', top: '100%', left: 0, zIndex: 30, marginTop: 4,
-                  background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10,
-                  boxShadow: '0 8px 24px rgba(20,24,58,.16)', padding: 10, minWidth: 210,
-                }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{d} {MONTHS[m - 1]}</div>
-                  {dayLessons.map((l, li) => (
-                    <div key={li} style={{ fontSize: 12, paddingTop: li ? 6 : 0, borderTop: li ? `1px solid ${C.grey}` : 'none', marginTop: li ? 6 : 0 }}>
-                      <div style={{ fontWeight: 700 }}>{l.subject_name || l.group_name}</div>
-                      <div style={{ color: C.slate }}>{l.group_name} · {l.teacher_name || '—'}</div>
-                      {l.topic && <div style={{ color: C.faint, fontSize: 11.5 }}>{l.topic}</div>}
-                      <div style={{ fontWeight: 700, color: l.present ? C.ok : '#dc2626', marginTop: 2 }}>
-                        {l.present ? '✓ был' : '✕ пропуск'}
-                        {l.absence_reason ? ` · ${l.absence_reason}` : ''}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                      gap: 6, padding: '9px 14px', borderRadius: '9px 9px 0 0', fontSize: 13, fontWeight: 700,
+                      whiteSpace: 'nowrap', border: 'none', cursor: 'pointer',
+                      color: on ? C.brand : C.slate,
+                      background: on ? C.card : 'transparent',
+                      borderBottom: on ? `2px solid ${C.brand}` : '2px solid transparent',
+                    }}>
+                    <Icon size={15} /> {o.t}
+                  </button>
+                )
+              })}
             </div>
-          )
-        })}
-      </div>
-
-      <div className="rowflex" style={{ gap: 16, marginTop: 12, fontSize: 12, color: C.slate, flexWrap: 'wrap' }}>
-        <Legend2 color={C.ok} text="был" />
-        <Legend2 color="#dc2626" text="пропуск" />
-        <Legend2 color={C.line} text="занятия не было" />
-      </div>
-      {lessons.length === 0 && (
-        <p style={{ fontSize: 13, color: C.faint, textAlign: 'center', marginTop: 14 }}>
-          В этом месяце занятий не было.
-        </p>
-      )}
-    </>
-  )
-}
-
-function LessonList({ lessons }) {
-  if (!lessons.length) return <p style={{ fontSize: 13, color: C.faint, textAlign: 'center', padding: 24 }}>В этом месяце занятий не было.</p>
-  return (
-    <DataTable
-      columns={[
-        { key: 'lesson_date', label: 'Дата', render: (l) => fmtDate(l.lesson_date), width: 90 },
-        { key: 'subject_name', label: 'Предмет' },
-        { key: 'group_name', label: 'Группа' },
-        { key: 'teacher_name', label: 'Преподаватель', render: (l) => l.teacher_name || '—' },
-        {
-          key: 'present', label: 'Статус', width: 100,
-          render: (l) => (
-            <span style={{ fontSize: 12, fontWeight: 700, color: l.present ? C.ok : '#dc2626', background: l.present ? C.okSoft : '#fee2e2', padding: '3px 9px', borderRadius: 20 }}>
-              {l.present ? 'был' : 'пропуск'}
-            </span>
-          ),
-        },
-        { key: 'absence_reason', label: 'Причина', render: (l) => l.absence_reason || '—' },
-      ]}
-      rows={lessons.map((l, i) => ({ ...l, id: l.lesson_id || i }))}
-      pageSize={20}
-      initialSort={{ key: 'lesson_date', dir: 'desc' }}
-    />
-  )
-}
-
-// ---------- ДИНАМИКА ПО НЕДЕЛЯМ ----------
-function Dynamics({ lessons }) {
-  const data = useMemo(() => {
-    const byWeek = {}
-    lessons.forEach((l) => {
-      const d = new Date(l.lesson_date)
-      const wk = weekKey(d)
-      const w = (byWeek[wk] ||= { week: wk, total: 0, present: 0 })
-      w.total++
-      if (l.present) w.present++
-    })
-    return Object.values(byWeek)
-      .sort((a, b) => a.week.localeCompare(b.week))
-      .map((w) => ({
-        week: w.week.slice(5),
-        pct: w.total ? Math.round((w.present / w.total) * 100) : 0,
-      }))
-  }, [lessons])
-
-  if (data.length < 2) return null
-
-  return (
-    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 800 }}>Динамика посещаемости по неделям</h2>
-      <ResponsiveContainer width="100%" height={200}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke={C.line} />
-          <XAxis dataKey="week" tick={{ fontSize: 11 }} />
-          <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
-          <Tooltip formatter={(v) => [`${v}%`, 'посещаемость']} />
-          <Line type="monotone" dataKey="pct" stroke={C.brand} strokeWidth={2.5} dot={{ r: 3 }} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-// ---------- МЕЛОЧИ ----------
-const navBtn = {
-  width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.line}`,
-  background: '#fff', color: C.slate, cursor: 'pointer', display: 'grid', placeItems: 'center',
-}
-
-function Contact({ icon: Icon, label, value }) {
-  return (
-    <div className="rowflex" style={{ gap: 7 }}>
-      <div style={{ width: 30, height: 30, borderRadius: 8, background: C.grey, color: C.slate, display: 'grid', placeItems: 'center' }}>
-        <Icon size={14} />
-      </div>
-      <div>
-        <div style={{ fontSize: 11, color: C.faint }}>{label}</div>
-        <a href={`tel:${value}`} style={{ fontSize: 13, fontWeight: 700, color: C.ink, textDecoration: 'none' }}>{value}</a>
-      </div>
-    </div>
-  )
-}
-
-function Metric({ value, suffix = '', label, tint }) {
-  return (
-    <div style={{ background: C.grey, borderRadius: 11, padding: '11px 13px' }}>
-      <div style={{ fontSize: 22, fontWeight: 800, color: tint || C.ink, lineHeight: 1 }}>{value}{suffix}</div>
-      <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>{label}</div>
-    </div>
-  )
-}
-
-function Legend2({ color, text }) {
-  return (
-    <span className="rowflex" style={{ gap: 5 }}>
-      <span style={{ width: 9, height: 9, borderRadius: '50%', background: color }} /> {text}
-    </span>
-  )
-}
-
-const pctColor = (p) => p >= 85 ? C.ok : p >= 65 ? '#d97706' : '#dc2626'
-
-function weekKey(d) {
-  const t = new Date(d)
-  const day = (t.getDay() + 6) % 7
-  t.setDate(t.getDate() - day)
-  return t.toISOString().slice(0, 10)
-}
-
-function eventLabel(e) {
-  const map = {
-    contact: 'Контакт с родителем',
-    enrolled: 'Зачислен в группу',
-    transferred: 'Переведён',
-    absent_streak: 'Пропуски подряд',
-    archived: 'Архивирован',
-  }
-  const base = map[e.event_type] || e.event_type
-  const note = e.payload?.note
-  return note ? `${base}: ${note}` : base
-}
-
-// ---------- ЖУРНАЛ ОБЩЕНИЯ ----------
-const COMM_KIND = {
-  call:    { t: 'Звонок',     color: '#0369a1', bg: '#e0f2fe' },
-  message: { t: 'Сообщение',  color: '#0d9488', bg: '#ccfbf1' },
-  meeting: { t: 'Встреча',    color: '#7c3aed', bg: '#f3e8ff' },
-  note:    { t: 'Заметка',    color: '#6b7194', bg: '#eef0f6' },
-}
-
-const COMM_RESULTS = ['дозвонились', 'не ответил', 'перезвонить', '—']
-
-function CommModal({ studentId, onClose, onSaved }) {
-  const [kind, setKind] = useState('call')
-  const [result, setResult] = useState('дозвонились')
-  const [note, setNote] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  async function save() {
-    setBusy(true); setErr('')
-    try {
-      await addCommunication(studentId, kind, note.trim(), kind === 'call' ? result : null, null)
-      await onSaved()
-    } catch (e) { setErr(e.message); setBusy(false) }
-  }
-
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 70 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 420, padding: 22 }}>
-        <h3 style={{ margin: '0 0 14px', fontSize: 17, fontWeight: 800 }}>Запись в журнал общения</h3>
-
-        <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 6 }}>Тип</div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-          {Object.entries(COMM_KIND).map(([k, v]) => (
-            <button key={k} onClick={() => setKind(k)}
-              style={{
-                padding: '6px 12px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
-                border: kind === k ? `1.5px solid ${v.color}` : `1px solid ${C.line}`,
-                background: kind === k ? v.bg : '#fff', color: kind === k ? v.color : C.slate,
-              }}>{v.t}</button>
-          ))}
-        </div>
-
-        {kind === 'call' && (
-          <>
-            <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 6 }}>Результат</div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-              {COMM_RESULTS.map((r) => (
-                <button key={r} onClick={() => setResult(r)}
-                  style={{
-                    padding: '6px 12px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
-                    border: result === r ? `1.5px solid ${C.brand}` : `1px solid ${C.line}`,
-                    background: result === r ? C.brandSoft : '#fff', color: result === r ? C.brand : C.slate,
-                  }}>{r}</button>
-              ))}
-            </div>
-          </>
+          </div>
         )}
+      </header>
 
-        <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 6 }}>Комментарий</div>
-        <textarea value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} rows={3}
-          placeholder="Что обсудили"
-          style={{ width: '100%', padding: 10, border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }} />
+      <main className="wrap" style={{ padding: '20px 16px 64px' }}>
+        {error && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 14, borderRadius: 12, marginBottom: 16, fontSize: 14 }}>{error}</div>}
 
-        {err && <div style={{ color: '#c2360b', fontSize: 13, marginTop: 8 }}>{err}</div>}
-
-        <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-          <button onClick={onClose} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Отмена</button>
-          <button onClick={save} disabled={busy}
-            style={{ flex: 1, padding: 11, borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
-            {busy ? 'Сохраняю…' : 'Сохранить'}
-          </button>
-        </div>
-      </div>
+        {!dict ? (
+          <Spinner label="Загрузка данных…" />
+        ) : openStudent ? (
+          <StudentCard studentId={openStudent} onBack={() => setOpenStudent(null)} />
+        ) : isManager && view === 'dashboard' ? (
+          <Dashboard onOpenRisks={() => setView('risks')} />
+        ) : isManager && view === 'analytics' ? (
+          <Analytics onOpenStudent={(id) => setOpenStudent(id)} />
+        ) : isManager && view === 'risks' ? (
+          <Risks onOpenStudent={(id) => setOpenStudent(id)} />
+        ) : isManager && view === 'schedule' ? (
+          <Schedule dict={dict} isAdmin={isAdmin} />
+        ) : isManager && view === 'payroll' ? (
+          <Payroll isAdmin={isAdmin} />
+        ) : isManager && view === 'timesheets' ? (
+          <Timesheets dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
+        ) : isAdmin && view === 'manage' ? (
+          !fullDict ? (
+            <Spinner label="Загрузка справочников…" />
+          ) : (
+            <Manage
+              dict={fullDict}
+              subjects={fullDict.subjects}
+              onBack={() => setView('cabinet')}
+              onChanged={reloadAllDicts}
+              onOpenStudent={(id) => setOpenStudent(id)}
+            />
+          )
+        ) : isManager ? (
+          <AdminCabinet dict={dict} lessons={lessons} period={period} setPeriod={setPeriod} periodLabel={periodLabel}
+            onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
+        ) : teacher ? (
+          <>
+            <div style={{ display: 'flex', gap: 7, marginBottom: 16 }}>
+              {[
+                { k: 'mylessons', t: 'Мои занятия' },
+                { k: 'journal', t: 'Журнал' },
+              ].map((o) => {
+                const on = (view === o.k) || (o.k === 'mylessons' && view !== 'journal')
+                return (
+                  <button key={o.k} onClick={() => setView(o.k)}
+                    style={{
+                      padding: '9px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+                      border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                      background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate,
+                    }}>{o.t}</button>
+                )
+              })}
+            </div>
+            {view === 'journal' ? (
+              <TeacherCabinet teacher={teacher} dict={dict} lessons={lessons} period={period} setPeriod={setPeriod}
+                onLessonAdded={onLessonAdded} onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
+            ) : (
+              <MyLessons />
+            )}
+          </>
+        ) : (
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center', color: C.slate }}>
+            Ваш аккаунт не привязан к преподавателю. Обратитесь к администратору центра, чтобы он связал ваш профиль с карточкой преподавателя.
+          </div>
+        )}
+        {dataLoading && dict && <div style={{ textAlign: 'center', color: C.faint, fontSize: 12, marginTop: 16 }}>Обновление…</div>}
+      </main>
     </div>
   )
+}
+
+function FullScreen({ children }) {
+  return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: C.bg, fontFamily: "'Inter',system-ui,sans-serif" }}>{children}</div>
 }

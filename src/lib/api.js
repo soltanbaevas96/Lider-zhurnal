@@ -489,3 +489,114 @@ export async function updateStudentStatus(id, patch) {
   const { error } = await supabase.from('students').update(patch).eq('id', id)
   if (error) throw error
 }
+
+// ---------- ЗАРПЛАТА ----------
+// Расчёт за месяц ('YYYY-MM'). Если месяц закрыт — вернутся зафиксированные суммы.
+export async function fetchPayroll(month) {
+  const { data, error } = await supabase.rpc('get_payroll', { p_month: month })
+  if (error) throw error
+  return data || []
+}
+
+// Закрыть месяц (зафиксировать табель)
+export async function closePayroll(month) {
+  const { data, error } = await supabase.rpc('close_payroll', { p_month: month })
+  if (error) throw error
+  return data
+}
+
+// Открыть месяц обратно
+export async function reopenPayroll(month) {
+  const { error } = await supabase.rpc('reopen_payroll', { p_month: month })
+  if (error) throw error
+}
+
+// Список закрытых периодов
+export async function fetchPayrollPeriods() {
+  const { data, error } = await supabase.rpc('get_payroll_periods')
+  if (error) throw error
+  return data || []
+}
+
+// Обновить ставку преподавателя
+export async function updateTeacherRate(teacherId, rate) {
+  const { error } = await supabase.from('teachers')
+    .update({ rate: Number(rate) || 0 }).eq('id', teacherId)
+  if (error) throw error
+}
+
+// ---------- РАСПИСАНИЕ ----------
+export async function fetchScheduleGrid() {
+  const { data, error } = await supabase.rpc('get_schedule_grid')
+  if (error) throw error
+  return data || []
+}
+
+export async function addSchedule(row) {
+  const { error } = await supabase.from('schedule').insert(row)
+  if (error) throw error
+}
+
+export async function updateSchedule(id, patch) {
+  const { error } = await supabase.from('schedule').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteSchedule(id) {
+  const { error } = await supabase.from('schedule').update({ archived: true }).eq('id', id)
+  if (error) throw error
+}
+
+// Сгенерировать ожидаемые занятия за период
+export async function generateLessons(from, to) {
+  const { data, error } = await supabase.rpc('generate_lessons', { p_from: from, p_to: to })
+  if (error) throw error
+  return data
+}
+
+// Занятия преподавателя на дату
+export async function fetchMyLessons(date) {
+  const { data, error } = await supabase.rpc('get_my_lessons', { p_date: date })
+  if (error) throw error
+  return data || []
+}
+
+// Непроведённые занятия (контроль)
+export async function fetchMissedLessons(days = 14) {
+  const { data, error } = await supabase.rpc('get_missed_lessons', { p_days: days })
+  if (error) throw error
+  return data || []
+}
+
+// Провести занятие: тема + посещаемость + статус
+export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance }) {
+  const { error: le } = await supabase.from('lessons').update({
+    topic: topic || '',
+    comment: comment || null,
+    lessons_count: Number(lessons_count) || 2,
+    status: 'проведён',
+    conducted_at: new Date().toISOString(),
+  }).eq('id', lessonId)
+  if (le) throw le
+
+  await supabase.from('attendance').delete().eq('lesson_id', lessonId)
+  if (attendance?.length) {
+    const rows = attendance.map((a) => ({
+      lesson_id: lessonId,
+      student_id: a.student_id,
+      status: a.status || 'present',
+      present: a.status !== 'absent',           // совместимость со старой логикой
+      absence_reason: a.status === 'absent' ? (a.absence_reason || null) : null,
+    }))
+    const { error } = await supabase.from('attendance').insert(rows)
+    if (error) throw error
+  }
+}
+
+// Отменить занятие
+export async function cancelLesson(lessonId, reason) {
+  const { error } = await supabase.from('lessons')
+    .update({ status: 'отменён', cancel_reason: reason || null })
+    .eq('id', lessonId)
+  if (error) throw error
+}
