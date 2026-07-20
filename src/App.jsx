@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3 } from 'lucide-react'
+import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, periodRange, periodLabelOf } from './lib/utils'
@@ -13,6 +13,9 @@ import Dashboard from './pages/Dashboard'
 import Risks from './pages/Risks'
 import StudentCard from './pages/StudentCard'
 import Analytics from './pages/Analytics'
+import Payroll from './pages/Payroll'
+import Schedule from './pages/Schedule'
+import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
 
 export default function App() {
@@ -147,9 +150,11 @@ export default function App() {
               {[
                 { k: 'dashboard', t: 'Дашборд', icon: LayoutDashboard },
                 { k: 'cabinet', t: 'Сводка', icon: GraduationCap },
+                { k: 'schedule', t: 'Расписание', icon: CalendarClock },
                 { k: 'analytics', t: 'Аналитика', icon: BarChart3 },
                 { k: 'risks', t: 'Риски', icon: AlertTriangle },
                 { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
+                { k: 'payroll', t: 'Зарплата', icon: Wallet },
                 ...(isAdmin ? [{ k: 'manage', t: 'Управление', icon: Settings }] : []),
               ].map((o) => {
                 const on = view === o.k
@@ -193,6 +198,10 @@ export default function App() {
           <Analytics onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'risks' ? (
           <Risks onOpenStudent={(id) => setOpenStudent(id)} />
+        ) : isManager && view === 'schedule' ? (
+          <Schedule dict={dict} isAdmin={isAdmin} />
+        ) : isManager && view === 'payroll' ? (
+          <Payroll isAdmin={isAdmin} />
         ) : isManager && view === 'timesheets' ? (
           <Timesheets dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isAdmin && view === 'manage' ? (
@@ -211,8 +220,30 @@ export default function App() {
           <AdminCabinet dict={dict} lessons={lessons} period={period} setPeriod={setPeriod} periodLabel={periodLabel}
             onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
         ) : teacher ? (
-          <TeacherCabinet teacher={teacher} dict={dict} lessons={lessons} period={period} setPeriod={setPeriod}
-            onLessonAdded={onLessonAdded} onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
+          <>
+            <div style={{ display: 'flex', gap: 7, marginBottom: 16 }}>
+              {[
+                { k: 'mylessons', t: 'Мои занятия' },
+                { k: 'journal', t: 'Журнал' },
+              ].map((o) => {
+                const on = (view === o.k) || (o.k === 'mylessons' && view !== 'journal')
+                return (
+                  <button key={o.k} onClick={() => setView(o.k)}
+                    style={{
+                      padding: '9px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+                      border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                      background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate,
+                    }}>{o.t}</button>
+                )
+              })}
+            </div>
+            {view === 'journal' ? (
+              <TeacherCabinet teacher={teacher} dict={dict} lessons={lessons} period={period} setPeriod={setPeriod}
+                onLessonAdded={onLessonAdded} onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
+            ) : (
+              <MyLessons />
+            )}
+          </>
         ) : (
           <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center', color: C.slate }}>
             Ваш аккаунт не привязан к преподавателю. Обратитесь к администратору центра, чтобы он связал ваш профиль с карточкой преподавателя.
