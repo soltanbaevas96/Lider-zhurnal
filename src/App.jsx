@@ -193,7 +193,7 @@ export default function App() {
         ) : openStudent ? (
           <StudentCard studentId={openStudent} onBack={() => setOpenStudent(null)} />
         ) : isManager && view === 'dashboard' ? (
-          <Dashboard onOpenRisks={() => setView('risks')} />
+          <Dashboard onOpenRisks={() => setView('risks')} onOpenSection={(v) => setView(v)} />
         ) : isManager && view === 'analytics' ? (
           <Analytics onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'risks' ? (

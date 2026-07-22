@@ -8,6 +8,7 @@ import {
 } from '../lib/api'
 import { C } from '../lib/utils'
 import DataTable from '../components/DataTable'
+import Curators from './Curators'
 
 const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
   'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
@@ -15,6 +16,7 @@ const MONTHS = ['январь', 'февраль', 'март', 'апрель', '�
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
 
 export default function Payroll({ isAdmin }) {
+  const [payTab, setPayTab] = useState('teachers') // teachers | curators
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [rows, setRows] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -109,10 +111,30 @@ export default function Payroll({ isAdmin }) {
 
   return (
     <div>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ margin: '0 0 12px', fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Зарплата</h1>
+        <div style={{ display: 'flex', gap: 7 }}>
+          {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'curators', t: 'Кураторы' }].map((o) => {
+            const on = payTab === o.k
+            return (
+              <button key={o.k} onClick={() => setPayTab(o.k)}
+                style={{
+                  padding: '8px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+                  border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                  background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate,
+                }}>{o.t}</button>
+            )
+          })}
+        </div>
+      </div>
+
+      {payTab === 'curators' ? (
+        <Curators isAdmin={isAdmin} />
+      ) : (
+      <div>
       <div className="rowflex" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Зарплата</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>
+          <p style={{ margin: 0, fontSize: 13, color: C.slate }}>
             Уроки × ставка. Занятие = 2 или 3 урока.
           </p>
         </div>
@@ -204,6 +226,8 @@ export default function Payroll({ isAdmin }) {
           onCancel={() => setConfirm(null)}
           onConfirm={confirm === 'close' ? doClose : doReopen}
         />
+      )}
+    </div>
       )}
     </div>
   )

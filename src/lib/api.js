@@ -600,3 +600,51 @@ export async function cancelLesson(lessonId, reason) {
     .eq('id', lessonId)
   if (error) throw error
 }
+
+// ---------- ДАШБОРД (серверный расчёт) ----------
+// Все метрики считаются в Postgres. Фронт получает готовые числа —
+// это критично при 1500 учениках, иначе браузер грузит десятки тысяч записей.
+export async function fetchDashboard(from, to) {
+  const p = { p_from: from || null, p_to: to || null }
+  const [kpi, offices, subjects, weeks, worstTeachers, weakGroups, reasons] = await Promise.all([
+    supabase.rpc('get_dashboard_kpi', p),
+    supabase.rpc('get_dashboard_by_office', p),
+    supabase.rpc('get_dashboard_by_subject', p),
+    supabase.rpc('get_dashboard_weeks', { p_weeks: 12 }),
+    supabase.rpc('get_dashboard_worst_teachers', { ...p, p_limit: 5 }),
+    supabase.rpc('get_dashboard_weak_groups', { p_limit: 6 }),
+    supabase.rpc('get_dashboard_reasons', p),
+  ])
+  const err = kpi.error || offices.error || subjects.error || weeks.error
+    || worstTeachers.error || weakGroups.error || reasons.error
+  if (err) throw err
+  return {
+    kpi: kpi.data?.[0] || null,
+    offices: offices.data || [],
+    subjects: subjects.data || [],
+    weeks: weeks.data || [],
+    worstTeachers: worstTeachers.data || [],
+    weakGroups: weakGroups.data || [],
+    reasons: reasons.data || [],
+  }
+}
+
+// ---------- КУРАТОРЫ ----------
+export async function fetchCurators() {
+  const { data, error } = await supabase.from('curators')
+    .select('*').eq('archived', false).order('full_name')
+  if (error) throw error
+  return data || []
+}
+export async function updateCuratorRate(id, rate) {
+  const { error } = await supabase.from('curators').update({ rate: Number(rate) || 0 }).eq('id', id)
+  if (error) throw error
+}
+export async function addCurator(full_name, subject, rate) {
+  const { error } = await supabase.from('curators').insert({ full_name, subject, rate: Number(rate) || 0 })
+  if (error) throw error
+}
+export async function archiveCurator(id) {
+  const { error } = await supabase.from('curators').update({ archived: true }).eq('id', id)
+  if (error) throw error
+}
