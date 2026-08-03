@@ -248,6 +248,17 @@ export default function App() {
               <MyLessons />
             )}
           </>
+        ) : profile?.role === 'assistant' ? (
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center' }}>
+            <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8 }}>
+              Здравствуйте, {profile.full_name || 'ассистент'}!
+            </div>
+            <div style={{ fontSize: 14, color: C.slate, lineHeight: 1.6, maxWidth: 460, margin: '0 auto' }}>
+              Вы вошли как ассистент. Вас выбирает преподаватель при создании занятия —
+              отдельных действий от вас не требуется. Если нужен доступ к проведению занятий,
+              обратитесь к завучу.
+            </div>
+          </div>
         ) : (
           <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center', color: C.slate }}>
             Ваш аккаунт не привязан к преподавателю. Обратитесь к администратору центра, чтобы он связал ваш профиль с карточкой преподавателя.
