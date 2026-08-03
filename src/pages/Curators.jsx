@@ -1,39 +1,59 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Pencil, Archive, X, Download, GraduationCap } from 'lucide-react'
+import { Plus, Pencil, Archive, X, Download, GraduationCap, Wallet } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { fetchCurators, updateCuratorRate, addCurator, archiveCurator } from '../lib/api'
+import { fetchCurators, updateCuratorRate, addCurator, archiveCurator, fetchCuratorPayroll } from '../lib/api'
 import { C } from '../lib/utils'
 import DataTable from '../components/DataTable'
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
 
-export default function Curators({ isAdmin }) {
+export default function Curators({ isAdmin, month }) {
   const [rows, setRows] = useState(null)
-  const [edit, setEdit] = useState(null)   // куратор для правки ставки
+  const [pay, setPay] = useState([])          // зарплата за выбранный месяц
+  const [edit, setEdit] = useState(null)
   const [add, setAdd] = useState(false)
   const [err, setErr] = useState('')
 
   async function load() {
-    try { setRows(await fetchCurators()) }
-    catch (e) { setErr(e.message) }
+    try {
+      const [list, payroll] = await Promise.all([
+        fetchCurators(),
+        month ? fetchCuratorPayroll(month).catch(() => []) : Promise.resolve([]),
+      ])
+      setRows(list); setPay(payroll)
+    } catch (e) { setErr(e.message) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [month])
+
+  // сводим ставку и начисление
+  const payById = {}
+  pay.forEach((p) => { payById[p.curator_id] = p })
+  const totalPay = pay.reduce((s, p) => s + Number(p.total || 0), 0)
+  const totalUnits = pay.reduce((s, p) => s + Number(p.lesson_units || 0), 0)
 
   function exportXlsx() {
-    const data = (rows || []).map((c, i) => ({
-      '№': i + 1, 'Куратор': c.full_name, 'Предмет': c.subject || '',
-      'Ставка за урок': Number(c.rate),
-    }))
+    const data = (rows || []).map((c, i) => {
+      const p = payById[c.id]
+      return {
+        '№': i + 1, 'Куратор': c.full_name, 'Предмет': c.subject || '',
+        'Ставка за урок': Number(c.rate),
+        'Уроков за месяц': p?.lesson_units || 0,
+        'Занятий': p?.sessions || 0,
+        'К выплате': Number(p?.total || 0),
+      }
+    })
+    data.push({ '№': '', 'Куратор': 'ИТОГО', 'Предмет': '', 'Ставка за урок': '',
+      'Уроков за месяц': totalUnits, 'Занятий': '', 'К выплате': totalPay })
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Кураторы')
-    XLSX.writeFile(wb, `Кураторы_ставки.xlsx`)
+    XLSX.writeFile(wb, `Кураторы_${month || 'ставки'}.xlsx`)
   }
 
   const columns = [
     { key: 'full_name', label: 'Куратор', render: (c) => <b>{c.full_name}</b> },
     { key: 'subject', label: 'Предмет доп.занятий', render: (c) => c.subject || '—' },
     {
-      key: 'rate', label: 'Ставка/урок', num: true, width: 150,
+      key: 'rate', label: 'Ставка/урок', num: true, width: 140,
       render: (c) => (
         <span className="rowflex" style={{ gap: 6, justifyContent: 'flex-end' }}>
           {Number(c.rate) > 0
@@ -48,14 +68,30 @@ export default function Curators({ isAdmin }) {
         </span>
       ),
     },
+    {
+      key: 'units', label: 'Уроков', num: true, width: 80,
+      sortValue: (c) => payById[c.id]?.lesson_units || 0,
+      render: (c) => {
+        const p = payById[c.id]
+        return p ? p.lesson_units : <span style={{ color: C.faint }}>—</span>
+      },
+    },
+    {
+      key: 'total', label: 'К выплате', num: true, width: 130,
+      sortValue: (c) => Number(payById[c.id]?.total || 0),
+      render: (c) => {
+        const p = payById[c.id]
+        return p
+          ? <span style={{ color: C.brand, fontWeight: 800, fontSize: 14 }}>{money(p.total)} ₸</span>
+          : <span style={{ color: C.faint }}>—</span>
+      },
+    },
   ]
-
-  const total = (rows || []).reduce((s, c) => s + Number(c.rate || 0), 0)
 
   return (
     <div>
       <div className="rowflex" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
           <p style={{ margin: 0, fontSize: 13, color: C.slate }}>
             Кураторы ведут отдельные дополнительные занятия. У каждого своя ставка за урок.
           </p>
@@ -76,15 +112,43 @@ export default function Curators({ isAdmin }) {
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
+      {/* Итоги за месяц */}
+      {pay.length > 0 && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ background: C.brandSoft, border: '1px solid #c7d2fe', borderRadius: 12, padding: '13px 18px' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.brand, lineHeight: 1.1 }}>{money(totalPay)} ₸</div>
+            <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>к выплате кураторам</div>
+          </div>
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '13px 18px' }}>
+            <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.1 }}>{totalUnits}</div>
+            <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>уроков проведено</div>
+          </div>
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '13px 18px' }}>
+            <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.1 }}>{pay.length}</div>
+            <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>кураторов вели занятия</div>
+          </div>
+        </div>
+      )}
+
       {rows === null ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка…</div>
       ) : rows.length === 0 ? (
         <div style={{ padding: 50, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
           <GraduationCap size={30} color={C.faint} style={{ marginBottom: 10 }} />
-          <div style={{ fontSize: 15, fontWeight: 700 }}>Кураторов пока нет</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Кураторов пока нет</div>
+          <div style={{ fontSize: 13, color: C.slate }}>
+            Выполните SQL-файл со списком кураторов или добавьте вручную.
+          </div>
         </div>
       ) : (
-        <DataTable columns={columns} rows={rows} pageSize={40} initialSort={{ key: 'full_name', dir: 'asc' }} />
+        <>
+          {pay.length === 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 14px', borderRadius: 10, marginBottom: 12, fontSize: 12.5 }}>
+              За этот месяц кураторы не проводили занятий — начисления нет. Показаны только ставки.
+            </div>
+          )}
+          <DataTable columns={columns} rows={rows} pageSize={40} initialSort={{ key: 'full_name', dir: 'asc' }} />
+        </>
       )}
 
       {edit && <RateModal curator={edit} onClose={() => setEdit(null)}

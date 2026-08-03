@@ -112,7 +112,23 @@ export default function Payroll({ isAdmin }) {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <h1 style={{ margin: '0 0 12px', fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Зарплата</h1>
+        <div className="rowflex" style={{ gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4, flex: 1 }}>Зарплата</h1>
+          {/* Месяц — общий для обеих вкладок */}
+          <div className="rowflex" style={{ gap: 6 }}>
+            <button onClick={() => shiftMonth(-1)} style={navBtn} title="Предыдущий месяц"><ChevronLeft size={16} /></button>
+            <span style={{ fontSize: 14, fontWeight: 700, minWidth: 130, textAlign: 'center' }}>
+              {MONTHS[Number(month.slice(5, 7)) - 1]} {month.slice(0, 4)}
+            </span>
+            <button onClick={() => shiftMonth(1)} style={navBtn} title="Следующий месяц"><ChevronRight size={16} /></button>
+            {month !== new Date().toISOString().slice(0, 7) && (
+              <button onClick={() => setMonth(new Date().toISOString().slice(0, 7))}
+                style={{ ...navBtn, width: 'auto', padding: '0 11px', fontSize: 12.5, fontWeight: 600 }}>
+                Текущий
+              </button>
+            )}
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: 7 }}>
           {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'curators', t: 'Кураторы' }].map((o) => {
             const on = payTab === o.k
@@ -129,7 +145,7 @@ export default function Payroll({ isAdmin }) {
       </div>
 
       {payTab === 'curators' ? (
-        <Curators isAdmin={isAdmin} />
+        <Curators isAdmin={isAdmin} month={month} />
       ) : (
       <div>
       <div className="rowflex" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
@@ -137,15 +153,6 @@ export default function Payroll({ isAdmin }) {
           <p style={{ margin: 0, fontSize: 13, color: C.slate }}>
             Уроки × ставка. Занятие = 2 или 3 урока.
           </p>
-        </div>
-
-        {/* Месяц */}
-        <div className="rowflex" style={{ gap: 6 }}>
-          <button onClick={() => shiftMonth(-1)} style={navBtn}><ChevronLeft size={16} /></button>
-          <span style={{ fontSize: 14, fontWeight: 700, minWidth: 130, textAlign: 'center' }}>
-            {MONTHS[Number(month.slice(5, 7)) - 1]} {month.slice(0, 4)}
-          </span>
-          <button onClick={() => shiftMonth(1)} style={navBtn}><ChevronRight size={16} /></button>
         </div>
 
         {rows?.length > 0 && (

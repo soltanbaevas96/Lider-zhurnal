@@ -38,10 +38,12 @@ export function genPassword(len = 8) {
 
 // ---------- ПЕРИОДЫ ----------
 // Возвращает список последних N месяцев + «весь период»
-export function monthOptions(count = 6) {
+// Месяцы для выбора периода: назад и вперёд от текущего.
+// Вперёд нужны, чтобы смотреть будущее расписание и планы.
+export function monthOptions(back = 8, forward = 4) {
   const out = []
   const now = new Date()
-  for (let i = 0; i < count; i++) {
+  for (let i = back; i >= -forward; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const label = d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
@@ -49,6 +51,13 @@ export function monthOptions(count = 6) {
   }
   out.push({ v: 'all', label: 'Весь период' })
   return out
+}
+
+// Сдвиг месяца на n вперёд/назад: '2026-07' + 1 => '2026-08'
+export function shiftMonthStr(month, n) {
+  const [y, m] = month.split('-').map(Number)
+  const d = new Date(y, m - 1 + n, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 // month 'YYYY-MM' -> { from, to } первого и последнего дня; 'all' -> null

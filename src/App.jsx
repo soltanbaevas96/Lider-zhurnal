@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock } from 'lucide-react'
+import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, periodRange, periodLabelOf } from './lib/utils'
@@ -14,6 +14,7 @@ import Risks from './pages/Risks'
 import StudentCard from './pages/StudentCard'
 import Analytics from './pages/Analytics'
 import Payroll from './pages/Payroll'
+import Control from './pages/Control'
 import Schedule from './pages/Schedule'
 import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
@@ -155,6 +156,7 @@ export default function App() {
                 { k: 'risks', t: 'Риски', icon: AlertTriangle },
                 { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
                 { k: 'payroll', t: 'Зарплата', icon: Wallet },
+                { k: 'control', t: 'Контроль', icon: ShieldCheck },
                 ...(isAdmin ? [{ k: 'manage', t: 'Управление', icon: Settings }] : []),
               ].map((o) => {
                 const on = view === o.k
@@ -200,6 +202,8 @@ export default function App() {
           <Risks onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'schedule' ? (
           <Schedule dict={dict} isAdmin={isAdmin} />
+        ) : isManager && view === 'control' ? (
+          <Control onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'payroll' ? (
           <Payroll isAdmin={isAdmin} />
         ) : isManager && view === 'timesheets' ? (

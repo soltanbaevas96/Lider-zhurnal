@@ -3,26 +3,9 @@ import {
   CalendarDays, ChevronLeft, ChevronRight, Check, X, Clock, Wifi, RotateCcw, ArrowLeft, Ban,
 } from 'lucide-react'
 import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, conductLesson, cancelLesson } from '../lib/api'
+import { ST, REASONS } from '../components/AttendancePicker'
 import { C } from '../lib/utils'
 
-// 5 статусов посещаемости по ТЗ
-export const ST = [
-  { k: 'present', t: 'Был',      icon: Check,     color: C.ok,      bg: C.okSoft },
-  { k: 'absent',  t: 'Не был',   icon: X,         color: '#dc2626', bg: '#fee2e2' },
-  { k: 'late',    t: 'Опоздал',  icon: Clock,     color: '#d97706', bg: '#fef3c7' },
-  { k: 'online',  t: 'Онлайн',   icon: Wifi,      color: '#0d9488', bg: '#ccfbf1' },
-  { k: 'makeup',  t: 'Отработка',icon: RotateCcw, color: '#7c3aed', bg: '#f3e8ff' },
-]
-
-// причины пропуска по ТЗ
-export const REASONS = [
-  { k: 'illness',   t: 'Болезнь' },
-  { k: 'school',    t: 'Школа' },
-  { k: 'olympiad',  t: 'Олимпиада' },
-  { k: 'vacation',  t: 'Каникулы' },
-  { k: 'no_reason', t: 'Без причины' },
-  { k: 'other',     t: 'Другое' },
-]
 
 export default function MyLessons() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))

@@ -648,3 +648,19 @@ export async function archiveCurator(id) {
   const { error } = await supabase.from('curators').update({ archived: true }).eq('id', id)
   if (error) throw error
 }
+
+// Зарплата кураторов за месяц
+export async function fetchCuratorPayroll(month) {
+  const { data, error } = await supabase.rpc('get_curator_payroll', { p_month: month })
+  if (error) throw error
+  return data || []
+}
+
+// Дополнительные занятия кураторов
+export async function fetchExtraLessons(from, to) {
+  const { data, error } = await supabase.rpc('get_extra_lessons', {
+    p_from: from || null, p_to: to || null,
+  })
+  if (error) throw error
+  return data || []
+}
