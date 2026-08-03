@@ -41,16 +41,11 @@ export function AuthProvider({ children }) {
     let email = loginOrEmail.trim()
     if (!email.includes('@')) {
       const { data, error } = await supabase.rpc('email_for_login', { p_login: email.toLowerCase() })
-      if (error) return { error: { message: 'RPC email_for_login: ' + error.message } }
-      if (!data) return { error: { message: 'Логин не найден в базе (email_for_login вернул пусто)' } }
+      if (error) return { error: { message: 'Ошибка входа' } }
+      if (!data) return { error: { message: 'Неверный логин или пароль' } }
       email = data
     }
-    const res = await supabase.auth.signInWithPassword({ email, password })
-    // ВРЕМЕННО: показываем точную ошибку от Supabase Auth для диагностики
-    if (res.error) {
-      return { error: { message: `Auth: ${res.error.message} (email: ${email})` } }
-    }
-    return res
+    return supabase.auth.signInWithPassword({ email, password })
   }
   const signOut = () => supabase.auth.signOut()
 
