@@ -26,7 +26,7 @@ export default function Login() {
   async function submit() {
     setBusy(true); setErr('')
     const { error } = await signIn(email.trim(), pass)
-    if (error) setErr('Неверный логин или пароль')
+    if (error) setErr(error.message || 'Неверный логин или пароль')
     setBusy(false)
   }
 
