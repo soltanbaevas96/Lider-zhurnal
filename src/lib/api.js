@@ -250,12 +250,24 @@ export async function fetchStudentsWithGroups() {
   const { data: students, error: se } = await supabase
     .from('students').select('*').order('full_name').limit(100000)
   if (se) throw se
+  // группы тянем вместе с именем и предметом прямо из связей —
+  // не зависим от словаря групп на клиенте
   const { data: links, error: le } = await supabase
-    .from('student_groups').select('student_id, group_id').limit(100000)
+    .from('student_groups')
+    .select('student_id, group_id, groups(id, name, subject_name)')
+    .limit(100000)
   if (le) throw le
   const byStudent = {}
-  links.forEach((l) => { (byStudent[l.student_id] ||= []).push(l.group_id) })
-  return students.map((s) => ({ ...s, groupIds: byStudent[s.id] || [] }))
+  ;(links || []).forEach((l) => {
+    const arr = (byStudent[l.student_id] ||= { ids: [], groups: [] })
+    arr.ids.push(l.group_id)
+    if (l.groups) arr.groups.push(l.groups)
+  })
+  return students.map((s) => ({
+    ...s,
+    groupIds: byStudent[s.id]?.ids || [],
+    groupsData: byStudent[s.id]?.groups || [],   // {id, name, subject_name}
+  }))
 }
 
 export async function addStudent(fields, groupIds) {
