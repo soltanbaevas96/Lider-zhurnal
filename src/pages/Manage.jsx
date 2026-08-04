@@ -92,7 +92,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       <div className="rowflex" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Управление</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты и группы центра <span style={{ color: C.faint, fontSize: 11 }}>· v2</span></p>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты и группы центра</p>
         </div>
         {tab !== 'students' && (
           <button onClick={() => setModal({ kind: 'new' })} className="rowflex"
@@ -483,11 +483,11 @@ function StudentsManage({ groups, onOpenStudent }) {
 
   const groupName = (id) => groups.find((g) => g.id === id)?.name
 
-  // предметы ученика — из данных групп, пришедших вместе со связями
+  // предметы ученика — из RPC (_subjects), иначе из данных групп
   const subjectsOfStudent = (s) => {
+    if (s._subjects?.length) return [...new Set(s._subjects)].join(', ')
     const subs = (s.groupsData || [])
-      .map((g) => g?.subject_name)
-      .filter(Boolean)
+      .map((g) => g?.subject_name).filter(Boolean)
       .map((full) => String(full).split(' / ')[0])
     return [...new Set(subs)].join(', ')
   }
