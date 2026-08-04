@@ -258,9 +258,10 @@ export async function fetchStudentsWithGroups() {
   return students.map((s) => ({ ...s, groupIds: byStudent[s.id] || [] }))
 }
 
-export async function addStudent(full_name, contact, groupIds) {
+export async function addStudent(fields, groupIds) {
+  // fields: { full_name, contact, school, grade, office, lang, phone, parent_phone, parent_name, contract_no, note, enrolled_at }
   const { data, error } = await supabase.from('students')
-    .insert({ full_name, contact: contact || null }).select().single()
+    .insert({ ...fields, full_name: fields.full_name, contact: fields.contact || null }).select().single()
   if (error) throw error
   if (groupIds?.length) {
     await supabase.from('student_groups')
@@ -269,8 +270,8 @@ export async function addStudent(full_name, contact, groupIds) {
   return data
 }
 
-export async function updateStudent(id, full_name, contact, groupIds) {
-  await supabase.from('students').update({ full_name, contact: contact || null }).eq('id', id)
+export async function updateStudent(id, fields, groupIds) {
+  await supabase.from('students').update({ ...fields, contact: fields.contact || null }).eq('id', id)
   await supabase.from('student_groups').delete().eq('student_id', id)
   if (groupIds?.length) {
     await supabase.from('student_groups')
