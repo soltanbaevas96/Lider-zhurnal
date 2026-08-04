@@ -92,7 +92,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       <div className="rowflex" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Управление</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты и группы центра</p>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты и группы центра <span style={{ color: C.faint, fontSize: 11 }}>· v2</span></p>
         </div>
         {tab !== 'students' && (
           <button onClick={() => setModal({ kind: 'new' })} className="rowflex"
@@ -483,13 +483,18 @@ function StudentsManage({ groups, onOpenStudent }) {
 
   const groupName = (id) => groups.find((g) => g.id === id)?.name
 
-  // предметы ученика — из его групп (у каждой группы есть предмет)
+  // предметы ученика — из данных групп, пришедших вместе со связями
   const subjectsOfStudent = (s) => {
-    const subs = (s.groupIds || [])
-      .map((id) => groups.find((g) => g.id === id)?.subject_name)
+    const subs = (s.groupsData || [])
+      .map((g) => g?.subject_name)
       .filter(Boolean)
-      .map((full) => String(full).split(' / ')[0])   // краткое название
+      .map((full) => String(full).split(' / ')[0])
     return [...new Set(subs)].join(', ')
+  }
+  // имена групп — из данных групп напрямую (не зависим от словаря)
+  const groupNamesOf = (s) => {
+    if (s.groupsData?.length) return s.groupsData.map((g) => g.name).filter(Boolean).join(', ')
+    return (s.groupIds || []).map(groupName).filter(Boolean).join(', ')
   }
 
   const columns = [
@@ -509,7 +514,7 @@ function StudentsManage({ groups, onOpenStudent }) {
       key: 'groups', label: 'Группы', sortable: false,
       sortValue: (s) => s.groupIds.length,
       render: (s) => s.groupIds.length
-        ? <span style={{ color: C.ink }}>{s.groupIds.map(groupName).filter(Boolean).join(', ')}</span>
+        ? <span style={{ color: C.ink }}>{groupNamesOf(s)}</span>
         : <span style={{ color: C.faint }}>без группы</span>,
     },
     {
