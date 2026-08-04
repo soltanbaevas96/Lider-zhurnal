@@ -473,17 +473,23 @@ function StudentsManage({ groups, onOpenStudent }) {
   useEffect(() => { reload() }, [])
 
   const filtered = (students || []).filter((s) => {
-    if (officeOf(s.contact) !== office || langOf(s.contact) !== lang) return false
+    // офис/язык берём из колонок напрямую; если пусто — из contact (старые данные)
+    const sOffice = s.office || officeOf(s.contact)
+    const sLang = s.lang || langOf(s.contact)
+    if (sOffice !== office || sLang !== lang) return false
     const t = q.toLowerCase().trim()
     return !t || s.full_name.toLowerCase().includes(t)
   })
 
   const groupName = (id) => groups.find((g) => g.id === id)?.name
 
-  // предметы ученика из contact ("Офис · язык · предметы: X, Y")
-  const subjectsOf = (contact) => {
-    const m = (contact || '').split('предметы:')[1]
-    return m ? m.trim() : ''
+  // предметы ученика — из его групп (у каждой группы есть предмет)
+  const subjectsOfStudent = (s) => {
+    const subs = (s.groupIds || [])
+      .map((id) => groups.find((g) => g.id === id)?.subject_name)
+      .filter(Boolean)
+      .map((full) => String(full).split(' / ')[0])   // краткое название
+    return [...new Set(subs)].join(', ')
   }
 
   const columns = [
@@ -508,7 +514,7 @@ function StudentsManage({ groups, onOpenStudent }) {
     },
     {
       key: 'subjects', label: 'Предметы', sortable: false,
-      render: (s) => <span style={{ color: C.slate }}>{subjectsOf(s.contact) || '—'}</span>,
+      render: (s) => <span style={{ color: C.slate }}>{subjectsOfStudent(s) || '—'}</span>,
     },
     {
       key: 'edit', label: '', width: 46, sortable: false, num: true,
@@ -556,41 +562,100 @@ function StudentsManage({ groups, onOpenStudent }) {
 
 function StudentModal({ groups, row, onClose, onDone }) {
   const [name, setName] = useState(row?.full_name || '')
-  const [contact, setContact] = useState(row?.contact || '')
+  const [school, setSchool] = useState(row?.school || '')
+  const [grade, setGrade] = useState(row?.grade || '')
+  const [office, setOffice] = useState(row?.office || 'Маргулана')
+  const [lang, setLang] = useState(row?.lang || 'каз')
+  const [phone, setPhone] = useState(row?.phone || '')
+  const [parentPhone, setParentPhone] = useState(row?.parent_phone || '')
+  const [parentName, setParentName] = useState(row?.parent_name || '')
+  const [contractNo, setContractNo] = useState(row?.contract_no || '')
+  const [note, setNote] = useState(row?.note || '')
   const [groupIds, setGroupIds] = useState(row?.groupIds || [])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const valid = name.trim()
 
-  const toggle = (id) => setGroupIds((a) => a.includes(id) ? a.filter((x) => x !== id) : [...a, id])
-
   async function save() {
     setBusy(true); setErr('')
     try {
-      if (row) await updateStudent(row.id, name.trim(), contact, groupIds)
-      else await addStudent(name.trim(), contact, groupIds)
+      // contact собираем в формате "Офис · язык" — по нему работает фильтр списка
+      const contact = `${office || ''}${office && lang ? ' · ' : ''}${lang || ''}`.trim()
+      const fields = {
+        full_name: name.trim(), contact,
+        school: school.trim() || null,
+        grade: grade.trim() || null,
+        office: office || null,
+        lang: lang || null,
+        phone: phone.trim() || null,
+        parent_phone: parentPhone.trim() || null,
+        parent_name: parentName.trim() || null,
+        contract_no: contractNo.trim() || null,
+        note: note.trim() || null,
+      }
+      if (row) await updateStudent(row.id, fields, groupIds)
+      else await addStudent(fields, groupIds)
       onDone()
     } catch (e) { setErr(e.message || 'Не удалось сохранить'); setBusy(false) }
   }
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 50 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 460, padding: 24, maxHeight: '90vh', overflow: 'auto' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 500, padding: 24, maxHeight: '92vh', overflow: 'auto' }}>
         <div className="rowflex" style={{ marginBottom: 18 }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{row ? 'Редактировать ученика' : 'Новый ученик'}</h3>
           <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
         </div>
 
         <Field label="ФИО ученика"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Фамилия Имя" style={inp} autoFocus /></Field>
-        <Field label="Телефон / родитель (необязательно)"><input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="+7 ___ ___ __ __" style={inp} /></Field>
 
-        <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 8 }}>Группы</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Школа"><input value={school} onChange={(e) => setSchool(e.target.value)} placeholder="№ или название" style={inp} /></Field>
+          </div>
+          <div style={{ width: 90 }}>
+            <Field label="Класс"><input value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="11" style={inp} /></Field>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Офис">
+              <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
+                {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="Язык">
+              <select value={lang} onChange={(e) => setLang(e.target.value)} style={inp}>
+                <option value="каз">Казахский</option>
+                <option value="рус">Русский</option>
+              </select>
+            </Field>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Телефон ученика"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 ___ ___ __ __" style={inp} /></Field>
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="Телефон родителя"><input value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} placeholder="+7 ___ ___ __ __" style={inp} /></Field>
+          </div>
+        </div>
+
+        <Field label="ФИ родителя"><input value={parentName} onChange={(e) => setParentName(e.target.value)} placeholder="Фамилия Имя родителя" style={inp} /></Field>
+        <Field label="Номер договора"><input value={contractNo} onChange={(e) => setContractNo(e.target.value)} placeholder="напр. М03062026/001" style={inp} /></Field>
+        <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="напр. новый / перезаключение" style={inp} /></Field>
+
+        <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 8, marginTop: 4 }}>Группы</div>
         <GroupMultiSelect groups={groups} value={groupIds} onChange={setGroupIds} />
 
         {err && <div style={{ color: '#c2360b', fontSize: 13, margin: '8px 0' }}>{err}</div>}
 
         <button disabled={!valid || busy} onClick={save} className="rowflex"
-          style={{ width: '100%', justifyContent: 'center', marginTop: 8, padding: 12, gap: 7, background: valid && !busy ? C.brand : C.line, color: valid && !busy ? '#fff' : C.slate, borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: valid && !busy ? 'pointer' : 'default' }}>
+          style={{ width: '100%', justifyContent: 'center', marginTop: 12, padding: 12, gap: 7, background: valid && !busy ? C.brand : C.line, color: valid && !busy ? '#fff' : C.slate, borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: valid && !busy ? 'pointer' : 'default' }}>
           <Check size={17} /> {busy ? 'Сохранение…' : 'Сохранить'}
         </button>
       </div>
