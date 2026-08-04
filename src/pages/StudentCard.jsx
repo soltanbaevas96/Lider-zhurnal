@@ -117,9 +117,18 @@ export default function StudentCard({ studentId, onBack }) {
               </span>
             </div>
             <div style={{ fontSize: 13, color: C.slate, marginTop: 5 }}>
-              {[student.office, student.lang, student.school && `школа №${student.school}`, student.enrolled_at && `с ${fmtDate(student.enrolled_at)}`]
+              {[student.office, student.lang,
+                student.grade && `${student.grade} класс`,
+                student.school && `школа №${student.school}`,
+                student.enrolled_at && `с ${fmtDate(student.enrolled_at)}`]
                 .filter(Boolean).join(' · ')}
             </div>
+            {(student.contract_no || student.note) && (
+              <div style={{ fontSize: 12.5, color: C.faint, marginTop: 3 }}>
+                {[student.contract_no && `договор ${student.contract_no}`, student.note]
+                  .filter(Boolean).join(' · ')}
+              </div>
+            )}
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {student.phone && <Contact icon={Phone} label="Ученик" value={student.phone} />}
