@@ -247,26 +247,14 @@ export async function fetchAttendanceReport(period) {
 
 // Справочник учеников с их группами (для раздела «Ученики» у завуча)
 export async function fetchStudentsWithGroups() {
-  const { data: students, error: se } = await supabase
-    .from('students').select('*').order('full_name').limit(100000)
-  if (se) throw se
-  // группы тянем вместе с именем и предметом прямо из связей —
-  // не зависим от словаря групп на клиенте
-  const { data: links, error: le } = await supabase
-    .from('student_groups')
-    .select('student_id, group_id, groups(id, name, subject_name)')
-    .limit(100000)
-  if (le) throw le
-  const byStudent = {}
-  ;(links || []).forEach((l) => {
-    const arr = (byStudent[l.student_id] ||= { ids: [], groups: [] })
-    arr.ids.push(l.group_id)
-    if (l.groups) arr.groups.push(l.groups)
-  })
-  return students.map((s) => ({
+  // через серверную RPC — так же, как работает карточка ученика
+  const { data, error } = await supabase.rpc('get_students_list')
+  if (error) throw error
+  return (data || []).map((s) => ({
     ...s,
-    groupIds: byStudent[s.id]?.ids || [],
-    groupsData: byStudent[s.id]?.groups || [],   // {id, name, subject_name}
+    groupIds: s.group_ids || [],
+    groupsData: (s.group_names || []).map((name, i) => ({ id: (s.group_ids || [])[i], name })),
+    _subjects: s.subjects || [],
   }))
 }
 
