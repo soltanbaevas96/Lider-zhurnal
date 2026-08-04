@@ -8,7 +8,7 @@ export async function fetchDictionaries() {
     supabase.from('teachers').select('*').eq('archived', false).order('full_name'),
     supabase.from('assistants').select('*').eq('archived', false).order('full_name'),
     supabase.from('teacher_subjects').select('teacher_id, subject_id'),
-    supabase.from('students').select('id, full_name, contact').eq('archived', false).order('full_name'),
+    supabase.from('students').select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').limit(100000),
   ])
   const err = subjects.error || groups.error || teachers.error || assistants.error || tSubjects.error || students.error
   if (err) throw err
@@ -248,10 +248,10 @@ export async function fetchAttendanceReport(period) {
 // Справочник учеников с их группами (для раздела «Ученики» у завуча)
 export async function fetchStudentsWithGroups() {
   const { data: students, error: se } = await supabase
-    .from('students').select('*').order('full_name')
+    .from('students').select('*').order('full_name').limit(100000)
   if (se) throw se
   const { data: links, error: le } = await supabase
-    .from('student_groups').select('student_id, group_id')
+    .from('student_groups').select('student_id, group_id').limit(100000)
   if (le) throw le
   const byStudent = {}
   links.forEach((l) => { (byStudent[l.student_id] ||= []).push(l.group_id) })
@@ -321,7 +321,7 @@ export async function fetchTimesheetData(period) {
 
   // Связки ученик-группа (чтобы знать состав групп)
   const { data: links, error: lke } = await supabase
-    .from('student_groups').select('student_id, group_id')
+    .from('student_groups').select('student_id, group_id').limit(100000)
   if (lke) throw lke
 
   return { lessons, attendance, studentGroups: links }
@@ -424,8 +424,8 @@ export async function fetchDashboardData(period) {
 
   const [{ data: groups }, { data: students }, { data: links }] = await Promise.all([
     supabase.from('groups').select('id, name, office, lang, subject_name, capacity').eq('archived', false),
-    supabase.from('students').select('id, full_name, status, office, lang').eq('archived', false),
-    supabase.from('student_groups').select('student_id, group_id'),
+    supabase.from('students').select('id, full_name, status, office, lang').eq('archived', false).limit(100000),
+    supabase.from('student_groups').select('student_id, group_id').limit(100000),
   ])
 
   return { lessons, attendance, groups: groups || [], students: students || [], studentGroups: links || [] }
