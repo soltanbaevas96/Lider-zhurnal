@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import {
   Clock, CheckCircle2, FileText, AlertTriangle, Users, Search, ChevronRight,
-  Download, ArrowLeft, UserCheck, ClipboardCheck, Plus,
+  Download, ArrowLeft, UserCheck, ClipboardCheck, Plus, GraduationCap,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { C, lessonCount, nameOf, initials, avColorByIndex, periodRange } from '../lib/utils'
@@ -50,6 +50,15 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
         .sort((x, y) => y.hours - x.hours),
     }
   }).sort((x, y) => y.hours - x.hours), [dict.assistants, dict.teachers, lessons])
+
+  const curatorStats = useMemo(() => (dict.curators || []).map((c) => {
+    const done = lessons.filter((l) => l.curator_id === c.id && l.status === 'проведён')
+    return {
+      ...c,
+      count: done.length,
+      hours: done.reduce((s, l) => s + lessonCount(l), 0),
+    }
+  }).sort((x, y) => y.hours - x.hours), [dict.curators, lessons])
 
   const totals = useMemo(() => {
     const done = lessons.filter((l) => l.status === 'проведён')
@@ -118,7 +127,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
 
       <div className="rowflex" style={{ marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', background: C.grey, borderRadius: 11, padding: 3 }}>
-          {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'assistants', t: 'Ассистенты' }, { k: 'attendance', t: 'Посещаемость' }].map((o) => {
+          {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'curators', t: 'Кураторы' }, { k: 'assistants', t: 'Ассистенты' }, { k: 'attendance', t: 'Посещаемость' }].map((o) => {
             const a = tab === o.k
             return <button key={o.k} onClick={() => setTab(o.k)}
               style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: a ? C.card : 'transparent', color: a ? C.brand : C.slate, boxShadow: a ? '0 1px 4px rgba(20,24,58,.1)' : 'none', border: 'none', cursor: 'pointer' }}>{o.t}</button>
@@ -156,6 +165,28 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
         </div>
       ) : tab === 'attendance' ? (
         <AttendancePanel dict={dict} periodRange={periodRange(period)} periodLabel={periodLabel} />
+      ) : tab === 'curators' ? (
+        <div className="tgrid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+          {curatorStats.length === 0 ? (
+            <div style={{ color: C.slate, fontSize: 14, padding: 20 }}>Кураторов нет или они не загрузились.</div>
+          ) : curatorStats.map((c) => (
+            <div key={c.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18 }}>
+              <div className="rowflex" style={{ marginBottom: 14 }}>
+                <div style={{ width: 46, height: 46, borderRadius: 13, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}>
+                  <GraduationCap size={22} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.full_name}</div>
+                  <div style={{ fontSize: 12.5, color: C.slate }}>куратор{c.subject ? ` · ${c.subject}` : ''}</div>
+                </div>
+              </div>
+              <div className="rowflex" style={{ gap: 0, borderTop: `1px solid ${C.line}`, padding: '13px 0' }}>
+                <MiniStat value={c.hours} label="уроков" tint={C.brand} />
+                <MiniStat value={c.count} label="занятий" tint={C.ink} />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="tgrid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
           {assistantStats.map((a) => (

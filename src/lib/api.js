@@ -11,7 +11,7 @@ export async function fetchDictionaries() {
     supabase.from('teacher_subjects').select('teacher_id, subject_id'),
     supabase.from('students').select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').limit(100000),
   ])
-  const err = subjects.error || groups.error || teachers.error || assistants.error || tSubjects.error || students.error
+  const err = subjects.error || groups.error || teachers.error || assistants.error || curators.error || tSubjects.error || students.error
   if (err) throw err
   // карта: teacher_id -> [subject_id, ...]
   const subjectsByTeacher = {}
