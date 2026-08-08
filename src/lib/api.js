@@ -712,3 +712,8 @@ export async function fetchAssistantPayroll(from, to) {
   if (error) throw error
   return data || []
 }
+
+export async function updateAssistantRate(id, rate) {
+  const { error } = await supabase.from('assistants').update({ rate: Number(rate) || 0 }).eq('id', id)
+  if (error) throw error
+}

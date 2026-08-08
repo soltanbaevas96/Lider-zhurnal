@@ -336,20 +336,45 @@ function ConfirmBox({ title, text, confirmText, busy, onCancel, onConfirm }) {
 function AssistantsPayroll({ month }) {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState('')
+  const [editing, setEditing] = useState(null) // { id, value }
 
-  useEffect(() => {
+  function load() {
     const [y, m] = month.split('-').map(Number)
     const from = `${month}-01`
     const to = `${y}-${String(m).padStart(2, '0')}-${new Date(y, m, 0).getDate()}`
     import('../lib/api').then(({ fetchAssistantPayroll }) =>
       fetchAssistantPayroll(from, to).then(setRows).catch((e) => setErr(e.message)))
-  }, [month])
+  }
+  useEffect(() => { load() }, [month])
+
+  async function saveRate(id) {
+    try {
+      const { updateAssistantRate } = await import('../lib/api')
+      await updateAssistantRate(id, editing.value)
+      setEditing(null); load()
+    } catch (e) { setErr(e.message) }
+  }
 
   const total = (rows || []).reduce((s, r) => s + Number(r.pay || 0), 0)
 
   const columns = [
     { key: 'full_name', label: 'Ассистент', render: (r) => <b>{r.full_name}</b> },
-    { key: 'rate', label: 'Ставка', num: true, width: 110, render: (r) => `${money(r.rate)} ₸` },
+    { key: 'rate', label: 'Ставка/урок', num: true, width: 150, render: (r) => (
+      editing?.id === r.id ? (
+        <span className="rowflex" style={{ gap: 5, justifyContent: 'flex-end' }}>
+          <input type="number" value={editing.value} autoFocus
+            onChange={(e) => setEditing({ id: r.id, value: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && saveRate(r.id)}
+            style={{ width: 80, padding: '4px 8px', border: `1px solid ${C.brand}`, borderRadius: 7, fontSize: 13, textAlign: 'right' }} />
+          <button onClick={() => saveRate(r.id)} style={{ border: 'none', background: C.brand, color: '#fff', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12 }}>OK</button>
+        </span>
+      ) : (
+        <span className="rowflex" style={{ gap: 6, justifyContent: 'flex-end', cursor: 'pointer' }}
+          onClick={() => setEditing({ id: r.id, value: String(r.rate || '') })}>
+          {money(r.rate)} ₸ <Pencil size={12} color={C.slate} />
+        </span>
+      )
+    )},
     { key: 'lessons_sum', label: 'Уроков', num: true, width: 100, render: (r) => r.lessons_sum },
     { key: 'sessions', label: 'Занятий', num: true, width: 100, render: (r) => r.sessions },
     { key: 'pay', label: 'К оплате', num: true, width: 140, render: (r) => <b style={{ color: C.brand }}>{money(r.pay)} ₸</b> },
@@ -361,7 +386,7 @@ function AssistantsPayroll({ month }) {
   return (
     <div>
       <div className="rowflex" style={{ marginBottom: 14, gap: 12 }}>
-        <p style={{ margin: 0, fontSize: 13, color: C.slate, flex: 1 }}>Уроки × ставка ассистента. Ставку задайте в «Управление → Ассистенты».</p>
+        <p style={{ margin: 0, fontSize: 13, color: C.slate, flex: 1 }}>Уроки × ставка. Нажмите на ставку, чтобы изменить.</p>
         <div style={{ background: C.brandSoft, border: '1px solid #c7d2fe', borderRadius: 11, padding: '9px 15px' }}>
           <span style={{ fontSize: 12, color: C.slate }}>Итого: </span>
           <b style={{ fontSize: 15, color: C.brand }}>{money(total)} ₸</b>
@@ -369,7 +394,7 @@ function AssistantsPayroll({ month }) {
       </div>
       {rows.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
-          Нет данных за этот месяц
+          Нет ассистентов
         </div>
       ) : <DataTable columns={columns} rows={rows} pageSize={50} />}
     </div>
