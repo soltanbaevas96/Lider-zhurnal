@@ -43,6 +43,24 @@ export default function Timesheets({ dict, onOpenStudent }) {
 
   const teacherTotal = teacherRows.reduce((s, r) => s + r.lessonsSum, 0)
 
+  // ---------- ТАБЕЛЬ КУРАТОРОВ (доп.занятия) ----------
+  const curatorRows = useMemo(() => {
+    return (dict.curators || []).map((c) => {
+      const mine = doneLessons.filter((l) => l.curator_id === c.id)
+      const lessonsSum = mine.reduce((s, l) => s + lessonCount(l), 0)
+      return { id: c.id, name: c.full_name, lessonsSum, sessions: mine.length }
+    }).filter((r) => r.sessions > 0).sort((a, b) => b.lessonsSum - a.lessonsSum)
+  }, [dict.curators, doneLessons])
+
+  // ---------- ТАБЕЛЬ АССИСТЕНТОВ ----------
+  const assistantRows = useMemo(() => {
+    return (dict.assistants || []).map((a) => {
+      const mine = doneLessons.filter((l) => l.assistant_id === a.id)
+      const lessonsSum = mine.reduce((s, l) => s + lessonCount(l), 0)
+      return { id: a.id, name: a.full_name, lessonsSum, sessions: mine.length }
+    }).filter((r) => r.sessions > 0).sort((a, b) => b.lessonsSum - a.lessonsSum)
+  }, [dict.assistants, doneLessons])
+
   // ---------- СВОДНАЯ ПО УЧЕНИКАМ ----------
   // По каждому ученику и предмету: занятий было / посетил / пропустил + дни
   const studentRows = useMemo(() => {
@@ -152,7 +170,7 @@ export default function Timesheets({ dict, onOpenStudent }) {
 
       {/* Вкладки */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-        {[{ k: 'teachers', t: 'Преподаватели', icon: GraduationCap }, { k: 'students', t: 'Ученики', icon: Users }].map((x) => {
+        {[{ k: 'teachers', t: 'Преподаватели', icon: GraduationCap }, { k: 'curators', t: 'Кураторы', icon: GraduationCap }, { k: 'assistants', t: 'Ассистенты', icon: Users }, { k: 'students', t: 'Ученики', icon: Users }].map((x) => {
           const a = tab === x.k
           const Icon = x.icon
           return (
@@ -170,6 +188,10 @@ export default function Timesheets({ dict, onOpenStudent }) {
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
       ) : tab === 'teachers' ? (
         <TeacherTimesheet rows={teacherRows} total={teacherTotal} />
+      ) : tab === 'curators' ? (
+        <SimpleTimesheet rows={curatorRows} who="Куратор" />
+      ) : tab === 'assistants' ? (
+        <SimpleTimesheet rows={assistantRows} who="Ассистент" />
       ) : (
         <StudentTimesheet rows={studentRows} onOpenStudent={onOpenStudent} />
       )}
@@ -270,5 +292,33 @@ function Empty({ text }) {
     <div style={{ padding: 50, textAlign: 'center', color: C.faint, fontSize: 14, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
       <CalendarDays size={30} style={{ marginBottom: 10, opacity: 0.5 }} /><br />{text}
     </div>
+  )
+}
+
+// ---------- ТАБЕЛЬ КУРАТОРОВ / АССИСТЕНТОВ ----------
+function SimpleTimesheet({ rows, who }) {
+  if (!rows.length) return <Empty text="За этот период нет проведённых занятий." />
+  const total = rows.reduce((s, r) => s + r.lessonsSum, 0)
+  return (
+    <>
+      <div style={{ background: C.brandSoft, border: `1px solid ${C.brand}22`, borderRadius: 14, padding: '16px 20px', marginBottom: 16, display: 'flex', alignItems: 'baseline', gap: 12 }}>
+        <span style={{ fontSize: 32, fontWeight: 800, color: C.brand }}>{total}</span>
+        <span style={{ fontSize: 14, color: C.slate }}>уроков всего за период (для начисления зарплаты)</span>
+      </div>
+      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
+        <div className="rowflex" style={{ padding: '10px 16px', background: C.grey, fontSize: 12, fontWeight: 700, color: C.slate }}>
+          <span style={{ flex: 1 }}>{who}</span>
+          <span style={{ width: 80, textAlign: 'right' }}>Уроков</span>
+          <span style={{ width: 80, textAlign: 'right' }}>Занятий</span>
+        </div>
+        {rows.map((r) => (
+          <div key={r.id} className="rowflex" style={{ padding: '12px 16px', borderTop: `1px solid ${C.line}` }}>
+            <span style={{ flex: 1, fontWeight: 600 }}>{r.name}</span>
+            <span style={{ width: 80, textAlign: 'right', fontWeight: 700 }}>{r.lessonsSum}</span>
+            <span style={{ width: 80, textAlign: 'right', color: C.slate }}>{r.sessions}</span>
+          </div>
+        ))}
+      </div>
+    </>
   )
 }

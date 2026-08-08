@@ -242,7 +242,7 @@ function GroupModal({ row, office, onClose, onDone }) {
   )
 }
 
-function PaymentsTab({ office, onOpenStudent }) {
+export function PaymentsTab({ office, onOpenStudent }) {
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
   const [payFor, setPayFor] = useState(null)

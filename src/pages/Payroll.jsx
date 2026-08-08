@@ -130,7 +130,7 @@ export default function Payroll({ isAdmin }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 7 }}>
-          {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'curators', t: 'Кураторы' }].map((o) => {
+          {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'curators', t: 'Кураторы' }, { k: 'assistants', t: 'Ассистенты' }].map((o) => {
             const on = payTab === o.k
             return (
               <button key={o.k} onClick={() => setPayTab(o.k)}
@@ -146,6 +146,8 @@ export default function Payroll({ isAdmin }) {
 
       {payTab === 'curators' ? (
         <Curators isAdmin={isAdmin} month={month} />
+      ) : payTab === 'assistants' ? (
+        <AssistantsPayroll month={month} />
       ) : (
       <div>
       <div className="rowflex" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
@@ -326,6 +328,50 @@ function ConfirmBox({ title, text, confirmText, busy, onCancel, onConfirm }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Зарплата ассистентов: уроки × ставка
+function AssistantsPayroll({ month }) {
+  const [rows, setRows] = useState(null)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    const [y, m] = month.split('-').map(Number)
+    const from = `${month}-01`
+    const to = `${y}-${String(m).padStart(2, '0')}-${new Date(y, m, 0).getDate()}`
+    import('../lib/api').then(({ fetchAssistantPayroll }) =>
+      fetchAssistantPayroll(from, to).then(setRows).catch((e) => setErr(e.message)))
+  }, [month])
+
+  const total = (rows || []).reduce((s, r) => s + Number(r.pay || 0), 0)
+
+  const columns = [
+    { key: 'full_name', label: 'Ассистент', render: (r) => <b>{r.full_name}</b> },
+    { key: 'rate', label: 'Ставка', num: true, width: 110, render: (r) => `${money(r.rate)} ₸` },
+    { key: 'lessons_sum', label: 'Уроков', num: true, width: 100, render: (r) => r.lessons_sum },
+    { key: 'sessions', label: 'Занятий', num: true, width: 100, render: (r) => r.sessions },
+    { key: 'pay', label: 'К оплате', num: true, width: 140, render: (r) => <b style={{ color: C.brand }}>{money(r.pay)} ₸</b> },
+  ]
+
+  if (err) return <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, fontSize: 13 }}>{err}</div>
+  if (rows === null) return <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+
+  return (
+    <div>
+      <div className="rowflex" style={{ marginBottom: 14, gap: 12 }}>
+        <p style={{ margin: 0, fontSize: 13, color: C.slate, flex: 1 }}>Уроки × ставка ассистента. Ставку задайте в «Управление → Ассистенты».</p>
+        <div style={{ background: C.brandSoft, border: '1px solid #c7d2fe', borderRadius: 11, padding: '9px 15px' }}>
+          <span style={{ fontSize: 12, color: C.slate }}>Итого: </span>
+          <b style={{ fontSize: 15, color: C.brand }}>{money(total)} ₸</b>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: C.slate, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
+          Нет данных за этот месяц
+        </div>
+      ) : <DataTable columns={columns} rows={rows} pageSize={50} />}
     </div>
   )
 }

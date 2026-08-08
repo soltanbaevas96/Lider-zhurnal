@@ -7,7 +7,7 @@ import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, office
 import { inp, Field } from '../components/ui'
 import { GroupMultiSelect } from '../components/GroupSearchSelect'
 import {
-  addTeacher, addAssistant, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
+  addTeacher, addAssistant, addCurator, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
   fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
   addStudentToGroup, removeStudentFromGroup, fetchAllStudents,
 } from '../lib/api'
@@ -29,6 +29,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
 
   const tabs = [
     { k: 'teachers', t: 'Преподаватели', icon: GraduationCap },
+    { k: 'curators', t: 'Кураторы', icon: UserCheck },
     { k: 'assistants', t: 'Ассистенты', icon: UserCheck },
     { k: 'students', t: 'Ученики', icon: UsersRound },
     { k: 'groups', t: 'Группы', icon: Users },
@@ -53,11 +54,16 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
             ? { name: form.name }
             : tab === 'teachers'
               ? { full_name: form.full_name, subject_id: form.subject_id || null, phone: form.phone }
-              : { full_name: form.full_name, phone: form.phone }
+              : tab === 'curators'
+                ? { full_name: form.full_name, subject: form.subject || null, rate: Number(form.rate) || 0, phone: form.phone }
+                : tab === 'assistants'
+                  ? { full_name: form.full_name, rate: Number(form.rate) || 0, phone: form.phone }
+                  : { full_name: form.full_name, phone: form.phone }
         await updateRow(tab, modal.row.id, patch)
       } else {
         if (tab === 'teachers') await addTeacher({ full_name: form.full_name, subject_id: form.subject_id || null, phone: form.phone })
-        else if (tab === 'assistants') await addAssistant({ full_name: form.full_name, phone: form.phone })
+        else if (tab === 'curators') await addCurator(form.full_name, form.subject || null, Number(form.rate) || 0)
+        else if (tab === 'assistants') await addAssistant({ full_name: form.full_name, phone: form.phone, rate: Number(form.rate) || 0 })
         else if (tab === 'subjects') await addSubject(form.name)
         else await addGroup({ name: form.name })
       }
@@ -341,12 +347,14 @@ function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
     full_name: row?.full_name || '',
     name: row?.name || '',
     phone: row?.phone || '',
+    subject: row?.subject || '',
+    rate: row?.rate || '',
   })
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }))
   const valid = nameField ? form.name.trim() : form.full_name.trim()
 
   const title = row ? 'Редактировать' : 'Добавить'
-  const label = isGroup ? 'группу' : isSubject ? 'предмет' : tab === 'assistants' ? 'ассистента' : 'преподавателя'
+  const label = isGroup ? 'группу' : isSubject ? 'предмет' : tab === 'assistants' ? 'ассистента' : tab === 'curators' ? 'куратора' : 'преподавателя'
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 50 }}>
@@ -364,6 +372,18 @@ function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
           <>
             <Field label="ФИО"><input value={form.full_name} onChange={(e) => set('full_name', e.target.value)} placeholder="Фамилия Имя" style={inp} autoFocus /></Field>
             <Field label="Телефон (необязательно)"><input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+7 ___ ___ __ __" style={inp} /></Field>
+            {(tab === 'curators' || tab === 'assistants') && (
+              <div style={{ display: 'flex', gap: 10 }}>
+                {tab === 'curators' && (
+                  <div style={{ flex: 1 }}>
+                    <Field label="Предмет"><input value={form.subject || ''} onChange={(e) => set('subject', e.target.value)} placeholder="напр. Математика" style={inp} /></Field>
+                  </div>
+                )}
+                <div style={{ width: tab === 'curators' ? 130 : '100%' }}>
+                  <Field label="Ставка за урок, ₸"><input type="number" value={form.rate || ''} onChange={(e) => set('rate', e.target.value)} placeholder="0" style={inp} /></Field>
+                </div>
+              </div>
+            )}
             {isTeacher && !row && (
               <p style={{ fontSize: 12, color: C.faint, marginTop: -4, marginBottom: 8 }}>Группы и предметы назначите после создания — кнопкой «Группы/предметы».</p>
             )}

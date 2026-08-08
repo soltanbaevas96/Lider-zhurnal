@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
-import { C, monthOptions, periodRange, periodLabelOf } from './lib/utils'
+import { C, monthOptions, currentMonth, periodRange, periodLabelOf } from './lib/utils'
 import { Spinner } from './components/ui'
 import Login from './pages/Login'
 import TeacherCabinet from './pages/TeacherCabinet'
@@ -15,6 +15,7 @@ import Risks from './pages/Risks'
 import StudentCard from './pages/StudentCard'
 import Analytics from './pages/Analytics'
 import Payroll from './pages/Payroll'
+import PaymentsView from './pages/PaymentsView'
 import Control from './pages/Control'
 import Schedule from './pages/Schedule'
 import MyLessons from './pages/MyLessons'
@@ -26,7 +27,7 @@ export default function App() {
   const [dict, setDict] = useState(null)
   const [fullDict, setFullDict] = useState(null) // включая архивные, для управления
   const [lessons, setLessons] = useState([])
-  const [period, setPeriod] = useState({ mode: 'month', month: monthOptions(1)[0].v }) // текущий месяц
+  const [period, setPeriod] = useState({ mode: 'month', month: currentMonth() }) // текущий месяц
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState('')
   const [view, setView] = useState('cabinet') // cabinet | dashboard | risks | timesheets | manage | student
@@ -159,6 +160,7 @@ export default function App() {
                 { k: 'risks', t: 'Риски', icon: AlertTriangle },
                 { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
                 { k: 'payroll', t: 'Зарплата', icon: Wallet },
+                { k: 'payments', t: 'Оплаты', icon: Wallet },
                 { k: 'control', t: 'Контроль', icon: ShieldCheck },
                 ...(isAdmin ? [{ k: 'manage', t: 'Управление', icon: Settings }] : []),
               ].map((o) => {
@@ -209,6 +211,8 @@ export default function App() {
           <Control onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'payroll' ? (
           <Payroll isAdmin={isAdmin} />
+        ) : isManager && view === 'payments' ? (
+          <PaymentsView onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'timesheets' ? (
           <Timesheets dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isAdmin && view === 'manage' ? (

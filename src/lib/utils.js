@@ -40,6 +40,12 @@ export function genPassword(len = 8) {
 // Возвращает список последних N месяцев + «весь период»
 // Месяцы для выбора периода: назад и вперёд от текущего.
 // Вперёд нужны, чтобы смотреть будущее расписание и планы.
+// Текущий месяц в формате '2026-08'
+export function currentMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
 export function monthOptions(back = 8, forward = 4) {
   const out = []
   const now = new Date()

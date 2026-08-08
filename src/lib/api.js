@@ -2,11 +2,12 @@ import { supabase } from './supabase'
 
 // ---------- СПРАВОЧНИКИ ----------
 export async function fetchDictionaries() {
-  const [subjects, groups, teachers, assistants, tSubjects, students] = await Promise.all([
+  const [subjects, groups, teachers, assistants, curators, tSubjects, students] = await Promise.all([
     supabase.from('subjects').select('*').order('name'),
     supabase.from('groups').select('*').eq('archived', false).order('name'),
     supabase.from('teachers').select('*').eq('archived', false).order('full_name'),
     supabase.from('assistants').select('*').eq('archived', false).order('full_name'),
+    supabase.from('curators').select('*').eq('archived', false).order('full_name'),
     supabase.from('teacher_subjects').select('teacher_id, subject_id'),
     supabase.from('students').select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').limit(100000),
   ])
@@ -22,6 +23,7 @@ export async function fetchDictionaries() {
     groups: groups.data,
     teachers: teachers.data,
     assistants: assistants.data,
+    curators: curators.data || [],
     students: students.data,
     subjectsByTeacher,
   }
@@ -303,7 +305,7 @@ export async function fetchAllStudents() {
 export async function fetchTimesheetData(period) {
   // Уроки за период (только проведённые важны для табеля, но тянем все — отменённые отфильтруем)
   let lq = supabase.from('lessons')
-    .select('id, group_id, teacher_id, assistant_id, lesson_date, status, lessons_count, topic')
+    .select('id, group_id, teacher_id, assistant_id, curator_id, lesson_date, status, lessons_count, topic')
   if (period?.from) lq = lq.gte('lesson_date', period.from)
   if (period?.to) lq = lq.lte('lesson_date', period.to)
   const { data: lessons, error: le } = await lq
@@ -702,4 +704,11 @@ export async function createGroup(fields) {
 export async function updateGroup(id, fields) {
   const { error } = await supabase.from('groups').update(fields).eq('id', id)
   if (error) throw error
+}
+
+// ---------- ЗАРПЛАТА АССИСТЕНТОВ ----------
+export async function fetchAssistantPayroll(from, to) {
+  const { data, error } = await supabase.rpc('get_assistant_payroll', { p_from: from || null, p_to: to || null })
+  if (error) throw error
+  return data || []
 }
