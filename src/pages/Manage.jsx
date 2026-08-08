@@ -565,11 +565,11 @@ function StudentsManage({ groups, onOpenStudent }) {
   )
 }
 
-function StudentModal({ groups, row, onClose, onDone }) {
+export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
   const [name, setName] = useState(row?.full_name || '')
   const [school, setSchool] = useState(row?.school || '')
   const [grade, setGrade] = useState(row?.grade || '')
-  const [office, setOffice] = useState(row?.office || 'Маргулана')
+  const [office, setOffice] = useState(row?.office || fixedOffice || 'Маргулана')
   const [lang, setLang] = useState(row?.lang || 'каз')
   const [phone, setPhone] = useState(row?.phone || '')
   const [parentPhone, setParentPhone] = useState(row?.parent_phone || '')

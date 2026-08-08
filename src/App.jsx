@@ -7,6 +7,7 @@ import { Spinner } from './components/ui'
 import Login from './pages/Login'
 import TeacherCabinet from './pages/TeacherCabinet'
 import AdminCabinet from './pages/AdminCabinet'
+import OfficeManagerCabinet from './pages/OfficeManagerCabinet'
 import Manage from './pages/Manage'
 import Timesheets from './pages/Timesheets'
 import Dashboard from './pages/Dashboard'
@@ -20,7 +21,7 @@ import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
 
 export default function App() {
-  const { session, profile, teacher, isAdmin, isDirector, isManager, loading, signOut } = useAuth()
+  const { session, profile, teacher, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, managerOffice, loading, signOut } = useAuth()
 
   const [dict, setDict] = useState(null)
   const [fullDict, setFullDict] = useState(null) // включая архивные, для управления
@@ -130,7 +131,9 @@ export default function App() {
             <div>
               <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1, letterSpacing: -0.3 }}>Лидер Плюс</div>
               <div style={{ fontSize: 12, color: C.slate, marginTop: 3 }}>
-                {isDirector ? 'Кабинет директора' : isAdmin ? 'Кабинет завуча' : 'Кабинет преподавателя'}
+                {isDirector ? 'Кабинет директора' : isAdmin ? 'Кабинет завуча'
+                  : isSeniorOM ? 'Старший офис-менеджер' : isOfficeManager ? `Офис-менеджер · ${managerOffice || ''}`
+                  : profile?.role === 'assistant' ? 'Ассистент' : 'Кабинет преподавателя'}
               </div>
             </div>
           </div>
@@ -248,6 +251,12 @@ export default function App() {
               <MyLessons />
             )}
           </>
+        ) : (isOfficeManager || isSeniorOM) ? (
+          <OfficeManagerCabinet
+            managerOffice={managerOffice}
+            isSenior={isSeniorOM}
+            onOpenStudent={(id) => setOpenStudent(id)}
+          />
         ) : profile?.role === 'assistant' ? (
           <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center' }}>
             <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8 }}>

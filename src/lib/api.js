@@ -665,3 +665,41 @@ export async function fetchExtraLessons(from, to) {
   if (error) throw error
   return data || []
 }
+
+// ---------- ОПЛАТЫ ----------
+export async function fetchStudentsPayments(office) {
+  const { data, error } = await supabase.rpc('get_students_payments', { p_office: office || null })
+  if (error) throw error
+  return data || []
+}
+export async function fetchStudentPayments(studentId) {
+  const { data, error } = await supabase.rpc('get_student_payments', { p_student_id: studentId })
+  if (error) throw error
+  return data || []
+}
+export async function addPayment(studentId, amount, paidAt, method, note) {
+  const { error } = await supabase.rpc('add_payment', {
+    p_student_id: studentId, p_amount: Number(amount) || 0,
+    p_paid_at: paidAt || null, p_method: method || null, p_note: note || null,
+  })
+  if (error) throw error
+}
+export async function deletePayment(id) {
+  const { error } = await supabase.rpc('delete_payment', { p_id: id })
+  if (error) throw error
+}
+
+// ---------- ГРУППЫ (создание/редактирование) ----------
+export async function fetchAllGroups() {
+  const { data, error } = await supabase.from('groups').select('*').eq('archived', false).order('name').limit(100000)
+  if (error) throw error
+  return data || []
+}
+export async function createGroup(fields) {
+  const { error } = await supabase.from('groups').insert(fields)
+  if (error) throw error
+}
+export async function updateGroup(id, fields) {
+  const { error } = await supabase.from('groups').update(fields).eq('id', id)
+  if (error) throw error
+}
