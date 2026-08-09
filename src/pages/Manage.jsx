@@ -79,7 +79,12 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       setModal(null)
       await onChanged()
     } catch (e) {
-      setErr(e.message || 'Не удалось сохранить')
+      const m = e.message || ''
+      if (m.includes('duplicate') || m.includes('unique')) {
+        setErr(tab === 'groups' ? 'Группа с таким кодом уже есть в этом офисе. Выберите другой код.' : 'Такая запись уже существует.')
+      } else {
+        setErr(m || 'Не удалось сохранить')
+      }
     } finally {
       setBusy(false)
     }
