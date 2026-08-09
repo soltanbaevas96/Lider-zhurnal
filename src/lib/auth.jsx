@@ -7,7 +7,8 @@ export const useAuth = () => useContext(AuthCtx)
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)   // { id, full_name, role }
-  const [teacher, setTeacher] = useState(null)    // строка teachers, если пользователь-преподаватель
+  const [teacher, setTeacher] = useState(null)
+  const [curator, setCurator] = useState(null)
   const [loading, setLoading] = useState(true)
 
   async function loadProfile(userId) {
@@ -16,8 +17,11 @@ export function AuthProvider({ children }) {
     if (prof && prof.role === 'teacher') {
       const { data: t } = await supabase.from('teachers').select('*').eq('profile_id', userId).maybeSingle()
       setTeacher(t || null)
+      // может быть куратором (роль teacher, но есть карточка куратора)
+      const { data: c } = await supabase.from('curators').select('*').eq('profile_id', userId).maybeSingle()
+      setCurator(c || null)
     } else {
-      setTeacher(null)
+      setTeacher(null); setCurator(null)
     }
   }
 
@@ -59,7 +63,7 @@ export function AuthProvider({ children }) {
   const managerOffice = profile?.office || null
 
   return (
-    <AuthCtx.Provider value={{ session, profile, teacher, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, managerOffice, loading, signIn, signOut }}>
+    <AuthCtx.Provider value={{ session, profile, teacher, curator, isCurator: !!curator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, managerOffice, loading, signIn, signOut }}>
       {children}
     </AuthCtx.Provider>
   )

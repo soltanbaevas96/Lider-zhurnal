@@ -296,7 +296,7 @@ export async function removeStudentFromGroup(studentId, groupId) {
 // Все ученики (для поиска при добавлении в группу)
 export async function fetchAllStudents() {
   const { data, error } = await supabase.from('students')
-    .select('id, full_name, contact').eq('archived', false).order('full_name')
+    .select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').limit(100000)
   if (error) throw error
   return data
 }
@@ -735,5 +735,38 @@ export async function adminSetRole(profileId, role, office) {
 }
 export async function adminSoftDelete(kind, id) {
   const { error } = await supabase.rpc('admin_soft_delete', { p_kind: kind, p_id: id })
+  if (error) throw error
+}
+
+export async function adminCreateAccount(kind, cardId, login, password, role) {
+  const { error } = await supabase.rpc('admin_create_account', {
+    p_kind: kind, p_card_id: cardId, p_login: login, p_password: password, p_role: role,
+  })
+  if (error) throw error
+}
+
+// ---------- ЗАНЯТИЯ КУРАТОРА ----------
+export async function getMyCuratorId() {
+  const { data, error } = await supabase.rpc('my_curator_id')
+  if (error) throw error
+  return data || null
+}
+export async function createCuratorLesson(curatorId, date, lessonsCount, topic, studentIds) {
+  const { data, error } = await supabase.rpc('create_curator_lesson', {
+    p_curator_id: curatorId, p_date: date || null, p_lessons_count: Number(lessonsCount) || 1,
+    p_topic: topic || '', p_student_ids: studentIds || [],
+  })
+  if (error) throw error
+  return data
+}
+export async function getCuratorLessons(curatorId, from, to) {
+  const { data, error } = await supabase.rpc('get_curator_lessons', {
+    p_curator_id: curatorId, p_from: from || null, p_to: to || null,
+  })
+  if (error) throw error
+  return data || []
+}
+export async function deleteCuratorLesson(id) {
+  const { error } = await supabase.rpc('delete_curator_lesson', { p_lesson_id: id })
   if (error) throw error
 }

@@ -8,6 +8,7 @@ import Login from './pages/Login'
 import TeacherCabinet from './pages/TeacherCabinet'
 import AdminCabinet from './pages/AdminCabinet'
 import OfficeManagerCabinet from './pages/OfficeManagerCabinet'
+import CuratorCabinet from './pages/CuratorCabinet'
 import Manage from './pages/Manage'
 import Timesheets from './pages/Timesheets'
 import Dashboard from './pages/Dashboard'
@@ -22,7 +23,7 @@ import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
 
 export default function App() {
-  const { session, profile, teacher, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, managerOffice, loading, signOut } = useAuth()
+  const { session, profile, teacher, curator, isCurator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, managerOffice, loading, signOut } = useAuth()
 
   const [dict, setDict] = useState(null)
   const [fullDict, setFullDict] = useState(null) // включая архивные, для управления
@@ -230,6 +231,8 @@ export default function App() {
         ) : isManager ? (
           <AdminCabinet dict={dict} lessons={lessons} period={period} setPeriod={setPeriod} periodLabel={periodLabel}
             onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
+        ) : isCurator ? (
+          <CuratorCabinet curator={curator} />
         ) : teacher ? (
           <>
             <div style={{ display: 'flex', gap: 7, marginBottom: 16 }}>

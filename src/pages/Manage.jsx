@@ -10,7 +10,7 @@ import {
   addTeacher, addAssistant, addCurator, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
   fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
   addStudentToGroup, removeStudentFromGroup, fetchAllStudents,
-  getAccountInfo, adminSetPassword, adminSetRole, adminSoftDelete,
+  getAccountInfo, adminSetPassword, adminSetRole, adminSoftDelete, adminCreateAccount,
 } from '../lib/api'
 
 export default function Manage({ dict, subjects, onBack, onChanged, onOpenStudent }) {
@@ -205,12 +205,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
                     style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#7c3aed', background: '#f3e8ff', border: 'none', cursor: 'pointer' }}>
                     <Link2 size={13} /> <span className="hide-sm">Группы/предметы</span></button>
                 )}
-                {tab === 'teachers' && !r.profile_id && (
-                  <button onClick={() => setInvite(r)} disabled={busy} className="rowflex" title="Выдать доступ в систему"
-                    style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
-                    <KeyRound size={13} /> <span className="hide-sm">Доступ</span></button>
-                )}
-                {(tab === 'teachers' || tab === 'curators' || tab === 'assistants') && r.profile_id && (
+                {(tab === 'teachers' || tab === 'curators' || tab === 'assistants') && (
                   <button onClick={() => setAccountFor(r)} disabled={busy} className="rowflex" title="Профиль: логин, пароль, доступ"
                     style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
                     <KeyRound size={13} /> <span className="hide-sm">Профиль</span></button>
@@ -293,7 +288,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       )}
 
       {accountFor && (
-        <AccountModal row={accountFor} onClose={() => setAccountFor(null)} onDone={async () => { setAccountFor(null); await onChanged() }} />
+        <AccountModal row={accountFor} kind={tab} onClose={() => setAccountFor(null)} onDone={async () => { setAccountFor(null); await onChanged() }} />
       )}
 
       {confirmDelete && (
@@ -767,20 +762,42 @@ const ROLE_OPTIONS = [
   { v: 'senior_office_manager', t: 'Старший офис-менеджер — все офисы' },
 ]
 
-function AccountModal({ row, onClose, onDone }) {
+function AccountModal({ row, kind, onClose, onDone }) {
+  const hasAccount = !!row.profile_id
   const [info, setInfo] = useState(null)
   const [pass, setPass] = useState('')
+  const [login, setLogin] = useState('')
   const [role, setRole] = useState('')
   const [office, setOffice] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
 
+  const defaultRole = kind === 'assistants' ? 'assistant' : 'teacher'
+
   useEffect(() => {
-    getAccountInfo(row.profile_id).then((d) => {
-      setInfo(d); setRole(d?.role || 'teacher'); setOffice(d?.office || '')
-    }).catch((e) => setErr(e.message))
+    if (hasAccount) {
+      getAccountInfo(row.profile_id).then((d) => {
+        setInfo(d); setRole(d?.role || defaultRole); setOffice(d?.office || '')
+      }).catch((e) => setErr(e.message))
+    } else {
+      // предлагаем логин из имени (транслит)
+      setLogin(loginFromName(row.full_name || ''))
+      setPass(genPassword())
+      setRole(defaultRole)
+    }
   }, [row.profile_id])
+
+  async function createAccount() {
+    if (!login.trim()) { setErr('Введите логин'); return }
+    if (!pass || pass.length < 4) { setErr('Пароль минимум 4 символа'); return }
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      await adminCreateAccount(kind, row.id, login.trim().toLowerCase(), pass, role)
+      setMsg('Учётка создана')
+      await onDone()
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
 
   async function savePassword() {
     if (!pass || pass.length < 4) { setErr('Пароль минимум 4 символа'); return }
@@ -810,7 +827,26 @@ function AccountModal({ row, onClose, onDone }) {
         </div>
 
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{row.full_name}</div>
-        {!info ? <div style={{ color: C.slate, fontSize: 13, padding: 12 }}>Загрузка…</div> : (
+        {!hasAccount ? (
+          <>
+            <div style={{ background: '#fff7e6', border: '1px solid #f59e0b', borderRadius: 10, padding: 12, marginBottom: 14, fontSize: 13, color: '#78350f' }}>
+              У сотрудника ещё нет входа в систему. Задайте логин, пароль и доступ.
+            </div>
+            <Field label="Логин"><input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="напр. ivanovi" style={inp} /></Field>
+            <Field label="Пароль"><input value={pass} onChange={(e) => setPass(e.target.value)} placeholder="пароль" style={inp} /></Field>
+            <Field label="Доступ (роль)">
+              <select value={role} onChange={(e) => setRole(e.target.value)} style={inp}>
+                {ROLE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+              </select>
+            </Field>
+            <button onClick={createAccount} disabled={busy} className="rowflex"
+              style={{ width: '100%', justifyContent: 'center', gap: 6, padding: 12, background: C.brand, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
+              <Check size={16} /> {busy ? 'Создание…' : 'Создать вход'}
+            </button>
+            {msg && <div style={{ color: C.ok, fontSize: 13, marginTop: 10, textAlign: 'center' }}>{msg}</div>}
+            {err && <div style={{ color: '#c2360b', fontSize: 13, marginTop: 10, textAlign: 'center' }}>{err}</div>}
+          </>
+        ) : !info ? <div style={{ color: C.slate, fontSize: 13, padding: 12 }}>Загрузка…</div> : (
           <>
             <div style={{ background: C.grey, borderRadius: 12, padding: 14, margin: '12px 0' }}>
               <div className="rowflex" style={{ gap: 8, marginBottom: 6 }}>
