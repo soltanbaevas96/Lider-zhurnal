@@ -718,3 +718,22 @@ export async function updateAssistantRate(id, rate) {
   const { error } = await supabase.from('assistants').update({ rate: Number(rate) || 0 }).eq('id', id)
   if (error) throw error
 }
+
+// ---------- АДМИН-ФУНКЦИИ ЗАВУЧА ----------
+export async function getAccountInfo(profileId) {
+  const { data, error } = await supabase.rpc('get_account_info', { p_profile_id: profileId })
+  if (error) throw error
+  return data?.[0] || null
+}
+export async function adminSetPassword(profileId, password) {
+  const { error } = await supabase.rpc('admin_set_password', { p_profile_id: profileId, p_password: password })
+  if (error) throw error
+}
+export async function adminSetRole(profileId, role, office) {
+  const { error } = await supabase.rpc('admin_set_role', { p_profile_id: profileId, p_role: role, p_office: office || null })
+  if (error) throw error
+}
+export async function adminSoftDelete(kind, id) {
+  const { error } = await supabase.rpc('admin_soft_delete', { p_kind: kind, p_id: id })
+  if (error) throw error
+}

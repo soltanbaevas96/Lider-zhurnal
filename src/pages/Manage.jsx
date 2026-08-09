@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import {
-  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search,
+  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search, Trash2,
 } from 'lucide-react'
 import DataTable from '../components/DataTable'
 import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, officeOf, langOf, OFFICES } from '../lib/utils'
@@ -10,6 +10,7 @@ import {
   addTeacher, addAssistant, addCurator, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
   fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
   addStudentToGroup, removeStudentFromGroup, fetchAllStudents,
+  getAccountInfo, adminSetPassword, adminSetRole, adminSoftDelete,
 } from '../lib/api'
 
 export default function Manage({ dict, subjects, onBack, onChanged, onOpenStudent }) {
@@ -21,6 +22,8 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
   const [confirmArch, setConfirmArch] = useState(null) // строка для подтверждения архива/восстановления
   const [confirmEdit, setConfirmEdit] = useState(null) // строка для подтверждения редактирования
   const [viewGroup, setViewGroup] = useState(null) // группа для просмотра учеников
+  const [accountFor, setAccountFor] = useState(null) // сотрудник для карточки учётки (логин/пароль/роль)
+  const [confirmDelete, setConfirmDelete] = useState(null) // строка для подтверждения удаления
   const [gOffice, setGOffice] = useState('Маргулана') // фильтр групп: офис
   const [gLang, setGLang] = useState('каз') // фильтр групп: язык
   const [gQuery, setGQuery] = useState('') // поиск по группам
@@ -49,7 +52,8 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
     try {
       if (modal.row) {
         const patch = tab === 'groups'
-          ? { name: form.name }
+          ? { name: form.name, subject_name: form.subject_name || null, office: form.g_office || null, lang: form.g_lang || null,
+              capacity: Number(form.capacity) || 13, note: `${form.subject_name || ''} · ${form.g_office || ''} · ${form.g_lang || ''}` }
           : tab === 'subjects'
             ? { name: form.name }
             : tab === 'teachers'
@@ -65,7 +69,12 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
         else if (tab === 'curators') await addCurator(form.full_name, form.subject || null, Number(form.rate) || 0)
         else if (tab === 'assistants') await addAssistant({ full_name: form.full_name, phone: form.phone, rate: Number(form.rate) || 0 })
         else if (tab === 'subjects') await addSubject(form.name)
-        else await addGroup({ name: form.name })
+        else await addGroup({
+          name: form.name, subject_name: form.subject_name || null,
+          office: form.g_office || 'Маргулана', lang: form.g_lang || 'каз',
+          capacity: Number(form.capacity) || 13,
+          note: `${form.subject_name || ''} · ${form.g_office || 'Маргулана'} · ${form.g_lang || 'каз'}`,
+        })
       }
       setModal(null)
       await onChanged()
@@ -98,7 +107,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       <div className="rowflex" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Управление</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты, кураторы и группы центра <span style={{ color: C.faint, fontSize: 11 }}>· v4 ({(dict.curators || []).length} кур.)</span></p>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты, кураторы и группы центра <span style={{ color: C.faint, fontSize: 11 }}>· v5</span></p>
         </div>
         {tab !== 'students' && (
           <button onClick={() => setModal({ kind: 'new' })} className="rowflex"
@@ -196,10 +205,19 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
                     style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
                     <KeyRound size={13} /> <span className="hide-sm">Доступ</span></button>
                 )}
+                {(tab === 'teachers' || tab === 'curators' || tab === 'assistants') && r.profile_id && (
+                  <button onClick={() => setAccountFor(r)} disabled={busy} className="rowflex" title="Профиль: логин, пароль, доступ"
+                    style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
+                    <KeyRound size={13} /> <span className="hide-sm">Профиль</span></button>
+                )}
                 <button onClick={() => setConfirmEdit(r)} disabled={busy} title="Редактировать"
                   style={{ padding: 7, borderRadius: 8, color: C.slate, background: C.grey, border: 'none', cursor: 'pointer' }}><Pencil size={14} /></button>
                 <button onClick={() => setConfirmArch(r)} disabled={busy} title="В архив"
                   style={{ padding: 7, borderRadius: 8, color: C.warn, background: C.warnSoft, border: 'none', cursor: 'pointer' }}><Archive size={14} /></button>
+                {(tab === 'teachers' || tab === 'curators' || tab === 'assistants') && (
+                  <button onClick={() => setConfirmDelete(r)} disabled={busy} title="Удалить"
+                    style={{ padding: 7, borderRadius: 8, color: '#dc2626', background: '#fee2e2', border: 'none', cursor: 'pointer' }}><Trash2 size={14} /></button>
+                )}
               </>
             )}
           </div>
@@ -267,6 +285,24 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
 
       {viewGroup && (
         <GroupStudentsModal group={viewGroup} onClose={() => setViewGroup(null)} />
+      )}
+
+      {accountFor && (
+        <AccountModal row={accountFor} onClose={() => setAccountFor(null)} onDone={async () => { setAccountFor(null); await onChanged() }} />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title="Удалить сотрудника?"
+          message={`«${confirmDelete.full_name}» будет удалён, вход в систему отключён. История его уроков сохранится. Это действие необратимо.`}
+          confirmText="Удалить"
+          danger
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const r = confirmDelete; setConfirmDelete(null)
+            try { await adminSoftDelete(tab, r.id); await onChanged() } catch (e) { alert(e.message) }
+          }}
+        />
       )}
     </>
   )
@@ -349,6 +385,10 @@ function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
     phone: row?.phone || '',
     subject: row?.subject || '',
     rate: row?.rate || '',
+    subject_name: row?.subject_name || '',
+    g_office: row?.office || 'Маргулана',
+    g_lang: row?.lang || 'каз',
+    capacity: row?.capacity || '13',
   })
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }))
   const valid = nameField ? form.name.trim() : form.full_name.trim()
@@ -365,7 +405,30 @@ function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
         </div>
 
         {isGroup ? (
-          <Field label="Название группы"><input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. ЕНТ-11Б" style={inp} autoFocus /></Field>
+          <>
+            <Field label="Название (код группы)"><input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. 11КМС-1" style={inp} autoFocus /></Field>
+            <Field label="Предмет"><input value={form.subject_name || ''} onChange={(e) => set('subject_name', e.target.value)} placeholder="Напр. Математика" style={inp} /></Field>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="Офис">
+                  <select value={form.g_office || 'Маргулана'} onChange={(e) => set('g_office', e.target.value)} style={inp}>
+                    {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Field label="Язык">
+                  <select value={form.g_lang || 'каз'} onChange={(e) => set('g_lang', e.target.value)} style={inp}>
+                    <option value="каз">Казахский</option>
+                    <option value="рус">Русский</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ width: 110 }}>
+                <Field label="Вместимость"><input type="number" value={form.capacity || '13'} onChange={(e) => set('capacity', e.target.value)} style={inp} /></Field>
+              </div>
+            </div>
+          </>
         ) : isSubject ? (
           <Field label="Название предмета"><input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. Математика" style={inp} autoFocus /></Field>
         ) : (
@@ -689,6 +752,108 @@ export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
 }
 
 // ---------- ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ ----------
+// Карточка сотрудника: логин, пароль (смена), роль (= доступ к вкладкам)
+const ROLE_OPTIONS = [
+  { v: 'teacher', t: 'Преподаватель — свои занятия и журнал' },
+  { v: 'admin', t: 'Завуч — полный доступ' },
+  { v: 'director', t: 'Директор — просмотр всего' },
+  { v: 'assistant', t: 'Ассистент — помощь на занятиях' },
+  { v: 'office_manager', t: 'Офис-менеджер — свой офис' },
+  { v: 'senior_office_manager', t: 'Старший офис-менеджер — все офисы' },
+]
+
+function AccountModal({ row, onClose, onDone }) {
+  const [info, setInfo] = useState(null)
+  const [pass, setPass] = useState('')
+  const [role, setRole] = useState('')
+  const [office, setOffice] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    getAccountInfo(row.profile_id).then((d) => {
+      setInfo(d); setRole(d?.role || 'teacher'); setOffice(d?.office || '')
+    }).catch((e) => setErr(e.message))
+  }, [row.profile_id])
+
+  async function savePassword() {
+    if (!pass || pass.length < 4) { setErr('Пароль минимум 4 символа'); return }
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      await adminSetPassword(row.profile_id, pass)
+      setMsg('Пароль изменён'); setPass('')
+      const d = await getAccountInfo(row.profile_id); setInfo(d)
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  async function saveRole() {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      const needOffice = role === 'office_manager'
+      await adminSetRole(row.profile_id, role, needOffice ? office : null)
+      setMsg('Доступ обновлён')
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 60 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 460, padding: 24, maxHeight: '92vh', overflow: 'auto' }}>
+        <div className="rowflex" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Профиль сотрудника</h3>
+          <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
+        </div>
+
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{row.full_name}</div>
+        {!info ? <div style={{ color: C.slate, fontSize: 13, padding: 12 }}>Загрузка…</div> : (
+          <>
+            <div style={{ background: C.grey, borderRadius: 12, padding: 14, margin: '12px 0' }}>
+              <div className="rowflex" style={{ gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: C.slate, width: 60 }}>Логин:</span>
+                <b style={{ fontSize: 14, fontFamily: 'monospace' }}>{info.login}</b>
+              </div>
+              <div className="rowflex" style={{ gap: 8 }}>
+                <span style={{ fontSize: 12, color: C.slate, width: 60 }}>Пароль:</span>
+                <b style={{ fontSize: 14, fontFamily: 'monospace' }}>{info.password || '—'}</b>
+              </div>
+            </div>
+
+            {/* смена пароля */}
+            <Field label="Новый пароль">
+              <div className="rowflex" style={{ gap: 8 }}>
+                <input value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Введите новый пароль" style={inp} />
+                <button onClick={savePassword} disabled={busy} style={{ padding: '10px 14px', background: C.brand, color: '#fff', border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>Сменить</button>
+              </div>
+            </Field>
+
+            {/* роль = доступ */}
+            <Field label="Доступ (роль)">
+              <select value={role} onChange={(e) => setRole(e.target.value)} style={inp}>
+                {ROLE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+              </select>
+            </Field>
+            {role === 'office_manager' && (
+              <Field label="Офис (для офис-менеджера)">
+                <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
+                  <option value="">— выберите —</option>
+                  {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </Field>
+            )}
+            <button onClick={saveRole} disabled={busy} className="rowflex"
+              style={{ width: '100%', justifyContent: 'center', gap: 6, padding: 11, background: C.ink, color: '#fff', border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
+              <ShieldCheck size={15} /> Сохранить доступ
+            </button>
+
+            {msg && <div style={{ color: C.ok, fontSize: 13, marginTop: 10, textAlign: 'center' }}>{msg}</div>}
+            {err && <div style={{ color: '#c2360b', fontSize: 13, marginTop: 10, textAlign: 'center' }}>{err}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ConfirmModal({ title, message, confirmText = 'Подтвердить', danger = false, onCancel, onConfirm }) {
   return (
     <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 60 }}>
