@@ -98,7 +98,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       <div className="rowflex" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Управление</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты, кураторы и группы центра <span style={{ color: C.faint, fontSize: 11 }}>· v3 ({(dict.curators || []).length} кур.)</span></p>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты, кураторы и группы центра <span style={{ color: C.faint, fontSize: 11 }}>· v4 ({(dict.curators || []).length} кур.)</span></p>
         </div>
         {tab !== 'students' && (
           <button onClick={() => setModal({ kind: 'new' })} className="rowflex"

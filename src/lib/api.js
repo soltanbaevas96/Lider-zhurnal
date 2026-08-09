@@ -107,15 +107,16 @@ export async function addSubject(name) {
 
 // Полные справочники, включая архивные — для раздела управления
 export async function fetchAllDictionaries() {
-  const [subjects, groups, teachers, assistants] = await Promise.all([
+  const [subjects, groups, teachers, assistants, curators] = await Promise.all([
     supabase.from('subjects').select('*').order('name'),
     supabase.from('groups').select('*').order('name'),
     supabase.from('teachers').select('*').order('full_name'),
     supabase.from('assistants').select('*').order('full_name'),
+    supabase.from('curators').select('*').order('full_name'),
   ])
-  const err = subjects.error || groups.error || teachers.error || assistants.error
+  const err = subjects.error || groups.error || teachers.error || assistants.error || curators.error
   if (err) throw err
-  return { subjects: subjects.data, groups: groups.data, teachers: teachers.data, assistants: assistants.data }
+  return { subjects: subjects.data, groups: groups.data, teachers: teachers.data, assistants: assistants.data, curators: curators.data || [] }
 }
 
 // ---------- ПРИГЛАШЕНИЕ / ПРИВЯЗКА ПРЕПОДАВАТЕЛЕЙ ----------
