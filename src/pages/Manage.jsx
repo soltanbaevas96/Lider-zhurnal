@@ -160,7 +160,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
           <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>{tab === 'groups' ? 'В этом офисе/языке групп нет.' : 'Пусто. Нажмите «Добавить».'}</div>
         )}
         {rows.map((r, i) => (
-          <div key={r.id} className="rowflex lrow" style={{ gap: 11, padding: '8px 14px', borderTop: i ? `1px solid ${C.line}` : 'none', opacity: r.archived ? 0.5 : 1 }}>
+          <div key={r.id} className="rowflex lrow" style={{ gap: 11, padding: '8px 14px', borderTop: i ? `1px solid ${C.line}` : 'none', opacity: r.archived ? 0.5 : 1, flexWrap: 'wrap' }}>
             {tab === 'groups' ? (
               <div style={{ width: 32, height: 32, borderRadius: 9, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}><Users size={16} /></div>
             ) : tab === 'subjects' ? (
