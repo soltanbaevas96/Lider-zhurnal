@@ -173,7 +173,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="rowflex" style={{ gap: 8 }}>
                 <span style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.full_name || r.name}</span>
-                {tab === 'teachers' && !r.archived && (
+                {(tab === 'teachers' || tab === 'curators' || tab === 'assistants') && !r.archived && (
                   r.profile_id
                     ? <span className="rowflex" style={{ gap: 3, fontSize: 10.5, fontWeight: 600, color: C.ok, background: C.okSoft, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}><ShieldCheck size={10} /> доступ</span>
                     : <span style={{ fontSize: 10.5, fontWeight: 600, color: C.slate, background: C.grey, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>нет доступа</span>
