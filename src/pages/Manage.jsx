@@ -760,6 +760,7 @@ const ROLE_OPTIONS = [
   { v: 'assistant', t: 'Ассистент — помощь на занятиях' },
   { v: 'office_manager', t: 'Офис-менеджер — свой офис' },
   { v: 'senior_office_manager', t: 'Старший офис-менеджер — все офисы' },
+  { v: 'accountant', t: 'Бухгалтер — зарплата, табель, оплаты' },
 ]
 
 function AccountModal({ row, kind, onClose, onDone }) {

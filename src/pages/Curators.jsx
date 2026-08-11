@@ -7,7 +7,8 @@ import DataTable from '../components/DataTable'
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
 
-export default function Curators({ isAdmin, month }) {
+export default function Curators({ isAdmin, canEditRate, month }) {
+  const canEdit = canEditRate ?? isAdmin
   const [rows, setRows] = useState(null)
   const [pay, setPay] = useState([])          // зарплата за выбранный месяц
   const [edit, setEdit] = useState(null)
@@ -59,7 +60,7 @@ export default function Curators({ isAdmin, month }) {
           {Number(c.rate) > 0
             ? <span>{money(c.rate)} ₸</span>
             : <span style={{ color: '#dc2626', fontWeight: 700 }}>не задана</span>}
-          {isAdmin && (
+          {canEdit && (
             <button onClick={(e) => { e.stopPropagation(); setEdit(c) }} title="Изменить ставку"
               style={{ border: 'none', background: C.grey, color: C.slate, borderRadius: 6, padding: 4, cursor: 'pointer', display: 'flex' }}>
               <Pencil size={12} />

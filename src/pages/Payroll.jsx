@@ -15,7 +15,8 @@ const MONTHS = ['январь', 'февраль', 'март', 'апрель', '�
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
 
-export default function Payroll({ isAdmin }) {
+export default function Payroll({ isAdmin, canEditRate }) {
+  const canEdit = canEditRate ?? isAdmin
   const [payTab, setPayTab] = useState('teachers') // teachers | curators
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [rows, setRows] = useState(null)
@@ -92,7 +93,7 @@ export default function Payroll({ isAdmin }) {
           {Number(r.rate) > 0
             ? <span>{money(r.rate)} ₸</span>
             : <span style={{ color: '#dc2626', fontWeight: 700 }}>не задана</span>}
-          {isAdmin && !isClosed && (
+          {canEdit && !isClosed && (
             <button onClick={(e) => { e.stopPropagation(); setEditRate(r) }} title="Изменить ставку"
               style={{ border: 'none', background: C.grey, color: C.slate, borderRadius: 6, padding: 4, cursor: 'pointer', display: 'flex' }}>
               <Pencil size={12} />
@@ -145,7 +146,7 @@ export default function Payroll({ isAdmin }) {
       </div>
 
       {payTab === 'curators' ? (
-        <Curators isAdmin={isAdmin} month={month} />
+        <Curators isAdmin={isAdmin} canEditRate={canEdit} month={month} />
       ) : payTab === 'assistants' ? (
         <AssistantsPayroll month={month} />
       ) : (

@@ -57,13 +57,14 @@ export function AuthProvider({ children }) {
   const isDirector = profile?.role === 'director'
   const isOfficeManager = profile?.role === 'office_manager'
   const isSeniorOM = profile?.role === 'senior_office_manager'
+  const isAccountant = profile?.role === 'accountant'
   // Директор и завуч видят управленческие разделы. Директор — без правки справочников.
   const isManager = isAdmin || isDirector
   // офис менеджера (null у старшего = все офисы)
   const managerOffice = profile?.office || null
 
   return (
-    <AuthCtx.Provider value={{ session, profile, teacher, curator, isCurator: !!curator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, managerOffice, loading, signIn, signOut }}>
+    <AuthCtx.Provider value={{ session, profile, teacher, curator, isCurator: !!curator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, isAccountant, managerOffice, loading, signIn, signOut }}>
       {children}
     </AuthCtx.Provider>
   )

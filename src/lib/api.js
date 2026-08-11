@@ -522,10 +522,11 @@ export async function fetchPayrollPeriods() {
   return data || []
 }
 
-// Обновить ставку преподавателя
+// Обновить ставку преподавателя (доступно admin и accountant — см. accountant_set_rate)
 export async function updateTeacherRate(teacherId, rate) {
-  const { error } = await supabase.from('teachers')
-    .update({ rate: Number(rate) || 0 }).eq('id', teacherId)
+  const { error } = await supabase.rpc('accountant_set_rate', {
+    p_kind: 'teachers', p_id: teacherId, p_rate: Number(rate) || 0,
+  })
   if (error) throw error
 }
 
@@ -641,7 +642,9 @@ export async function fetchCurators() {
   return data || []
 }
 export async function updateCuratorRate(id, rate) {
-  const { error } = await supabase.from('curators').update({ rate: Number(rate) || 0 }).eq('id', id)
+  const { error } = await supabase.rpc('accountant_set_rate', {
+    p_kind: 'curators', p_id: id, p_rate: Number(rate) || 0,
+  })
   if (error) throw error
 }
 export async function addCurator(full_name, subject, rate) {
@@ -715,7 +718,9 @@ export async function fetchAssistantPayroll(from, to) {
 }
 
 export async function updateAssistantRate(id, rate) {
-  const { error } = await supabase.from('assistants').update({ rate: Number(rate) || 0 }).eq('id', id)
+  const { error } = await supabase.rpc('accountant_set_rate', {
+    p_kind: 'assistants', p_id: id, p_rate: Number(rate) || 0,
+  })
   if (error) throw error
 }
 
