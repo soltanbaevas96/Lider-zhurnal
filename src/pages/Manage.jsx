@@ -841,6 +841,12 @@ function AccountModal({ row, kind, onClose, onDone }) {
                 {ROLE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
               </select>
             </Field>
+            {kind === 'curators' && (
+              <div style={{ background: C.brandSoft, borderRadius: 10, padding: 10, marginBottom: 14, fontSize: 12.5, color: C.brand, lineHeight: 1.5 }}>
+                Куратор входит как обычный «Преподаватель» — оставьте эту роль. Кабинет куратора
+                откроется автоматически, потому что вход привязывается к карточке в разделе «Кураторы».
+              </div>
+            )}
             {role === 'office_manager' && (
               <Field label="Офис (для офис-менеджера)">
                 <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
