@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck } from 'lucide-react'
+import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck, Banknote } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, currentMonth, periodRange, periodLabelOf } from './lib/utils'
@@ -23,7 +23,9 @@ import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
 
 export default function App() {
-  const { session, profile, teacher, curator, isCurator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, managerOffice, loading, signOut } = useAuth()
+  const { session, profile, teacher, curator, isCurator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, isAccountant, managerOffice, loading, signOut } = useAuth()
+  // Бухгалтер видит только Зарплату/Табель/Оплаты — без остальных управленческих разделов
+  const canSeeFinance = isManager || isAccountant
 
   const [dict, setDict] = useState(null)
   const [fullDict, setFullDict] = useState(null) // включая архивные, для управления
@@ -59,6 +61,11 @@ export default function App() {
     if (!session) return
     reloadDict().catch((e) => setError(e.message))
   }, [session])
+
+  // Бухгалтер не видит вкладку «Сводка» (view по умолчанию) — открываем сразу «Зарплату»
+  useEffect(() => {
+    if (isAccountant && !isManager && view === 'cabinet') setView('payroll')
+  }, [isAccountant, isManager, view])
 
   // Загрузка уроков при смене периода
   useEffect(() => {
@@ -135,6 +142,7 @@ export default function App() {
               <div style={{ fontSize: 12, color: C.slate, marginTop: 3 }}>
                 {isDirector ? 'Кабинет директора' : isAdmin ? 'Кабинет завуча'
                   : isSeniorOM ? 'Старший офис-менеджер' : isOfficeManager ? `Офис-менеджер · ${managerOffice || ''}`
+                  : isAccountant ? 'Бухгалтер'
                   : profile?.role === 'assistant' ? 'Ассистент' : 'Кабинет преподавателя'}
               </div>
             </div>
@@ -149,11 +157,11 @@ export default function App() {
           </div>
         </div>
 
-        {/* Навигация завуча */}
-        {isManager && (
+        {/* Навигация завуча / бухгалтера */}
+        {canSeeFinance && (
           <div className="wrap" style={{ paddingBottom: 0 }}>
             <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2 }}>
-              {[
+              {(isManager ? [
                 { k: 'dashboard', t: 'Дашборд', icon: LayoutDashboard },
                 { k: 'cabinet', t: 'Сводка', icon: GraduationCap },
                 { k: 'schedule', t: 'Расписание', icon: CalendarClock },
@@ -161,10 +169,15 @@ export default function App() {
                 { k: 'risks', t: 'Риски', icon: AlertTriangle },
                 { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
                 { k: 'payroll', t: 'Зарплата', icon: Wallet },
-                { k: 'payments', t: 'Оплаты', icon: Wallet },
+                { k: 'payments', t: 'Оплаты', icon: Banknote },
                 { k: 'control', t: 'Контроль', icon: ShieldCheck },
                 ...(isAdmin ? [{ k: 'manage', t: 'Управление', icon: Settings }] : []),
-              ].map((o) => {
+              ] : [
+                // Бухгалтер: только финансовые разделы
+                { k: 'payroll', t: 'Зарплата', icon: Wallet },
+                { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
+                { k: 'payments', t: 'Оплаты', icon: Banknote },
+              ]).map((o) => {
                 const on = view === o.k
                 const Icon = o.icon
                 return (
@@ -210,11 +223,11 @@ export default function App() {
           <Schedule dict={dict} isAdmin={isAdmin} />
         ) : isManager && view === 'control' ? (
           <Control onOpenStudent={(id) => setOpenStudent(id)} />
-        ) : isManager && view === 'payroll' ? (
-          <Payroll isAdmin={isAdmin} />
-        ) : isManager && view === 'payments' ? (
+        ) : canSeeFinance && view === 'payroll' ? (
+          <Payroll isAdmin={isAdmin} canEditRate={isAdmin || isAccountant} />
+        ) : canSeeFinance && view === 'payments' ? (
           <PaymentsView onOpenStudent={(id) => setOpenStudent(id)} />
-        ) : isManager && view === 'timesheets' ? (
+        ) : canSeeFinance && view === 'timesheets' ? (
           <Timesheets dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isAdmin && view === 'manage' ? (
           !fullDict ? (
@@ -233,6 +246,8 @@ export default function App() {
             onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
         ) : isCurator ? (
           <CuratorCabinet curator={curator} />
+        ) : isAccountant ? (
+          <Payroll isAdmin={isAdmin} canEditRate={isAdmin || isAccountant} />
         ) : teacher ? (
           <>
             <div style={{ display: 'flex', gap: 7, marginBottom: 16 }}>
