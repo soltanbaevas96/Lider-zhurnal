@@ -794,7 +794,8 @@ function AccountModal({ row, kind, onClose, onDone }) {
     if (!pass || pass.length < 4) { setErr('Пароль минимум 4 символа'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
-      await adminCreateAccount(kind, row.id, login.trim().toLowerCase(), pass, role)
+      const needOffice = role === 'office_manager'
+      await adminCreateAccount(kind, row.id, login.trim().toLowerCase(), pass, role, row.full_name, needOffice ? office : null)
       setMsg('Учётка создана')
       await onDone()
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
@@ -840,6 +841,14 @@ function AccountModal({ row, kind, onClose, onDone }) {
                 {ROLE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
               </select>
             </Field>
+            {role === 'office_manager' && (
+              <Field label="Офис (для офис-менеджера)">
+                <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
+                  <option value="">— выберите —</option>
+                  {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </Field>
+            )}
             <button onClick={createAccount} disabled={busy} className="rowflex"
               style={{ width: '100%', justifyContent: 'center', gap: 6, padding: 12, background: C.brand, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
               <Check size={16} /> {busy ? 'Создание…' : 'Создать вход'}

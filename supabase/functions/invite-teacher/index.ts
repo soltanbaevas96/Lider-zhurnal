@@ -1,9 +1,17 @@
 // =====================================================================
 //  Edge Function: invite-teacher (вход по логину)
-//  Создаёт аккаунт преподавателя/завуча с ЛОГИНОМ (не email).
-//  Внутри Supabase Auth используется технический email login@lider.local,
-//  пользователь видит и вводит только логин.
+//  Создаёт аккаунт сотрудника (преподаватель/куратор/ассистент/завуч/
+//  директор/офис-менеджер/старший офис-менеджер/бухгалтер) с ЛОГИНОМ
+//  (не email). Внутри Supabase Auth используется технический email
+//  login@lider.local, пользователь видит и вводит только логин.
+//
+//  Используется из Manage.jsx (кнопка «Профиль» → «Создать вход») для
+//  преподавателей/кураторов/ассистентов через adminCreateAccount(kind,
+//  card_id, ...), и напрямую через inviteTeacher({teacher_id, ...}) —
+//  оба варианта поддержаны для обратной совместимости.
+//
 //  Деплой:  supabase functions deploy invite-teacher
+//  (или Dashboard → Edge Functions → invite-teacher → вставить код → Deploy)
 // =====================================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -14,6 +22,18 @@ const cors = {
 }
 
 const EMAIL_DOMAIN = 'lider.local'
+
+const VALID_ROLES = [
+  'teacher', 'admin', 'director', 'assistant',
+  'office_manager', 'senior_office_manager', 'accountant',
+]
+
+// kind (Manage.jsx вкладка) -> таблица-карточка сотрудника
+const KIND_TABLE: Record<string, string> = {
+  teachers: 'teachers',
+  curators: 'curators',
+  assistants: 'assistants',
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
@@ -31,8 +51,14 @@ Deno.serve(async (req) => {
     const { data: prof } = await asUser.from('profiles').select('role').eq('id', user.id).single()
     if (prof?.role !== 'admin') return json({ error: 'Требуются права администратора' }, 403)
 
-    const { login, password, teacher_id, full_name, role } = await req.json()
+    const body = await req.json()
+    const { login, password, full_name, role, office } = body
+    // kind/card_id — новый способ (любая карточка); teacher_id — старый способ (только преподаватель)
+    const kind = body.kind ?? (body.teacher_id ? 'teachers' : null)
+    const cardId = body.card_id ?? body.teacher_id ?? null
+
     if (!login || !password) return json({ error: 'Нужны логин и пароль' }, 400)
+    if (password.length < 4) return json({ error: 'Пароль минимум 4 символа' }, 400)
 
     const username = String(login).toLowerCase().trim()
     if (!/^[a-z0-9._-]+$/.test(username))
@@ -54,15 +80,27 @@ Deno.serve(async (req) => {
     }
     const newUserId = created.user.id
 
-    // Профиль (роль + логин + имя)
-    const wantRole = role === 'admin' ? 'admin' : 'teacher'
-    await admin.from('profiles').update({ role: wantRole, full_name: full_name ?? '', username }).eq('id', newUserId)
+    // Профиль (роль + логин + имя + офис для office_manager)
+    const wantRole = VALID_ROLES.includes(role) ? role : 'teacher'
+    const { error: profErr } = await admin.from('profiles').update({
+      role: wantRole,
+      full_name: full_name ?? '',
+      username,
+      office: wantRole === 'office_manager' ? (office || null) : null,
+    }).eq('id', newUserId)
+    if (profErr) return json({ error: 'Пользователь создан, но не удалось настроить профиль: ' + profErr.message }, 200)
 
-    // Привязка к карточке преподавателя
-    if (teacher_id) {
-      const { error: linkErr } = await admin.from('teachers').update({ profile_id: newUserId }).eq('id', teacher_id)
+    // Привязка к карточке сотрудника (преподаватель/куратор/ассистент)
+    const table = kind ? KIND_TABLE[kind] : null
+    if (table && cardId) {
+      const { error: linkErr } = await admin.from(table).update({ profile_id: newUserId }).eq('id', cardId)
       if (linkErr) return json({ error: 'Аккаунт создан, но не удалось привязать: ' + linkErr.message }, 200)
     }
+
+    // Сохраняем "видимый" пароль (bcrypt необратим) — чтобы карточка «Профиль» могла его показать
+    await admin.from('_issued_logins').insert({
+      profile_id: newUserId, login: username, password, role_kind: wantRole, full_name: full_name ?? '',
+    })
 
     return json({ ok: true, user_id: newUserId, username, login: username })
   } catch (e) {

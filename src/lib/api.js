@@ -743,11 +743,20 @@ export async function adminSoftDelete(kind, id) {
   if (error) throw error
 }
 
-export async function adminCreateAccount(kind, cardId, login, password, role) {
-  const { error } = await supabase.rpc('admin_create_account', {
-    p_kind: kind, p_card_id: cardId, p_login: login, p_password: password, p_role: role,
+// Создание учётки (преподаватель/куратор/ассистент/любая роль) — через
+// Edge Function invite-teacher (не RPC: правильное создание пользователя
+// Supabase Auth требует Admin API, а не голого INSERT в auth.users).
+export async function adminCreateAccount(kind, cardId, login, password, role, fullName, office) {
+  const { data, error } = await supabase.functions.invoke('invite-teacher', {
+    body: { login, password, role, kind, card_id: cardId, full_name: fullName, office },
   })
-  if (error) throw error
+  if (error) {
+    let msg = error.message
+    try { const ctx = await error.context?.json(); if (ctx?.error) msg = ctx.error } catch {}
+    throw new Error(msg)
+  }
+  if (data?.error) throw new Error(data.error)
+  return data
 }
 
 // ---------- ЗАНЯТИЯ КУРАТОРА ----------
