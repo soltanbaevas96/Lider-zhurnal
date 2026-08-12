@@ -119,8 +119,8 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
       </div>
 
       <div className="stats" style={{ marginBottom: 28 }}>
-        <Stat icon={Clock} label="Всего уроков" value={totals.hours.toLocaleString('ru-RU')} tint={C.brand} bg={C.brandSoft} />
-        <Stat icon={CheckCircle2} label="Проведено уроков" value={totals.count} tint={C.ok} bg={C.okSoft} />
+        <Stat icon={Clock} label="Проведено уроков" value={totals.hours.toLocaleString('ru-RU')} tint={C.brand} bg={C.brandSoft} />
+        <Stat icon={CheckCircle2} label="Проведено занятий" value={totals.count} tint={C.ok} bg={C.okSoft} />
         <Stat icon={FileText} label="Без плана урока" value={totals.noPlan} tint={C.warn} bg={C.warnSoft} />
         <Stat icon={AlertTriangle} label="Отменено" value={totals.cancelled} tint={C.slate} bg={C.grey} />
       </div>
