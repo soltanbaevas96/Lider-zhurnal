@@ -564,6 +564,7 @@ function LinkModal({ teacher, groups, subjects, onClose, onDone }) {
 function StudentsManage({ groups, onOpenStudent }) {
   const [students, setStudents] = useState(null)
   const [modal, setModal] = useState(null) // { row } | 'new'
+  const [confirmDelete, setConfirmDelete] = useState(null)
   const [q, setQ] = useState('')
   const [office, setOffice] = useState('Маргулана')
   const [lang, setLang] = useState('каз')
@@ -625,8 +626,17 @@ function StudentsManage({ groups, onOpenStudent }) {
       render: (s) => <span style={{ color: C.slate }}>{subjectsOfStudent(s) || '—'}</span>,
     },
     {
-      key: 'edit', label: '', width: 46, sortable: false, num: true,
+      key: 'edit', label: '', width: 40, sortable: false, num: true,
       render: () => <Pencil size={15} color={C.slate} style={{ display: 'inline' }} />,
+    },
+    {
+      key: 'delete', label: '', width: 40, sortable: false, num: true,
+      render: (s) => (
+        <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(s) }} title="Удалить"
+          style={{ padding: 6, borderRadius: 8, color: '#dc2626', background: '#fee2e2', border: 'none', cursor: 'pointer', display: 'inline-flex' }}>
+          <Trash2 size={14} />
+        </button>
+      ),
     },
   ]
 
@@ -662,6 +672,20 @@ function StudentsManage({ groups, onOpenStudent }) {
           row={modal === 'new' ? null : modal.row}
           onClose={() => setModal(null)}
           onDone={async () => { setModal(null); await reload() }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title="Удалить ученика?"
+          message={`«${confirmDelete.full_name}» исчезнет из активных списков и из всех групп. История посещаемости и оплат сохранится.`}
+          confirmText="Удалить"
+          danger
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const s = confirmDelete; setConfirmDelete(null)
+            try { await deleteStudent(s.id); await reload() } catch (e) { setErr(e.message) }
+          }}
         />
       )}
     </>
@@ -714,7 +738,12 @@ function AccountsManage({ roles, roleOptions }) {
               {initials(r.full_name)}
             </div>
             <div style={{ flex: 1, minWidth: 120 }}>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{r.full_name || <span style={{ color: C.faint }}>без имени</span>}</div>
+              <div className="rowflex" style={{ gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{r.full_name || <span style={{ color: C.faint }}>без имени</span>}</span>
+                <span className="rowflex" style={{ gap: 3, fontSize: 10.5, fontWeight: 600, color: C.ok, background: C.okSoft, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                  <ShieldCheck size={10} /> доступ
+                </span>
+              </div>
               <div style={{ fontSize: 11.5, color: C.slate }}>
                 {ROLE_LABEL[r.role] || r.role}{r.role === 'office_manager' && r.office ? ` · ${r.office}` : ''}
               </div>
