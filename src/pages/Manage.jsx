@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import {
-  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search, Trash2,
+  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search, Trash2, Wallet, Building2,
 } from 'lucide-react'
 import DataTable from '../components/DataTable'
 import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, officeOf, langOf, OFFICES } from '../lib/utils'
@@ -9,8 +9,9 @@ import { GroupMultiSelect } from '../components/GroupSearchSelect'
 import {
   addTeacher, addAssistant, addCurator, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
   fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
-  addStudentToGroup, removeStudentFromGroup, fetchAllStudents,
+  addStudentToGroup, removeStudentFromGroup, fetchAllStudents, deleteStudent,
   getAccountInfo, adminSetPassword, adminSetRole, adminSoftDelete, adminCreateAccount,
+  fetchProfilesByRole, adminUpdateProfileName,
 } from '../lib/api'
 
 export default function Manage({ dict, subjects, onBack, onChanged, onOpenStudent }) {
@@ -34,10 +35,16 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
     { k: 'teachers', t: 'Преподаватели', icon: GraduationCap },
     { k: 'curators', t: 'Кураторы', icon: UserCheck },
     { k: 'assistants', t: 'Ассистенты', icon: UserCheck },
+    { k: 'office_managers', t: 'Офис-менеджеры', icon: Building2 },
+    { k: 'accountants', t: 'Бухгалтер', icon: Wallet },
     { k: 'students', t: 'Ученики', icon: UsersRound },
     { k: 'groups', t: 'Группы', icon: Users },
     { k: 'subjects', t: 'Предметы', icon: BookOpen },
   ]
+  // Вкладки без карточек-таблиц (office_managers/accountants) и ученики
+  // используют свои собственные экраны/кнопки — общий блок «Добавить» и
+  // «Показывать архивные» тут не подходит.
+  const isAccountsOnlyTab = tab === 'office_managers' || tab === 'accountants'
 
   let rows = (dict[tab] || []).filter((r) => showArchived ? true : !r.archived)
   // Группы дополнительно фильтруем по офису и языку (из note) + поиск
@@ -114,7 +121,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Управление</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Преподаватели, ассистенты, кураторы и группы центра <span style={{ color: C.faint, fontSize: 11 }}>· v5</span></p>
         </div>
-        {tab !== 'students' && (
+        {tab !== 'students' && !isAccountsOnlyTab && (
           <button onClick={() => setModal({ kind: 'new' })} className="rowflex"
             style={{ marginLeft: 'auto', gap: 7, padding: '10px 17px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
             <Plus size={17} /> Добавить
@@ -134,7 +141,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
               <Icon size={15} /> {o.t}</button>
           })}
         </div>
-        {tab !== 'students' && (
+        {tab !== 'students' && !isAccountsOnlyTab && (
           <label className="rowflex" style={{ marginLeft: 'auto', gap: 7, fontSize: 13, color: C.slate, cursor: 'pointer' }}>
             <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
             Показывать архивные
@@ -142,7 +149,20 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
         )}
       </div>
 
-      {tab === 'students' ? (
+      {tab === 'office_managers' ? (
+        <AccountsManage
+          roles={['office_manager', 'senior_office_manager']}
+          roleOptions={[
+            { v: 'office_manager', t: 'Обычный — свой офис' },
+            { v: 'senior_office_manager', t: 'Старший — все офисы' },
+          ]}
+        />
+      ) : tab === 'accountants' ? (
+        <AccountsManage
+          roles={['accountant']}
+          roleOptions={[{ v: 'accountant', t: 'Бухгалтер' }]}
+        />
+      ) : tab === 'students' ? (
         <StudentsManage groups={(dict.groups || []).filter((g) => !g.archived)} onOpenStudent={onOpenStudent} />
       ) : (
       <>
@@ -648,6 +668,256 @@ function StudentsManage({ groups, onOpenStudent }) {
   )
 }
 
+// ---------- УЧЁТКИ БЕЗ КАРТОЧКИ (офис-менеджеры, бухгалтер) ----------
+// В отличие от преподавателей/кураторов/ассистентов, у этих ролей нет
+// отдельной таблицы-карточки — сама учётка (запись в profiles) и есть
+// вся сущность. Поэтому создание/редактирование/удаление устроено проще.
+const ROLE_LABEL = {
+  office_manager: 'обычный офис-менеджер',
+  senior_office_manager: 'старший офис-менеджер',
+  accountant: 'бухгалтер',
+}
+
+function AccountsManage({ roles, roleOptions }) {
+  const [rows, setRows] = useState(null)
+  const [modal, setModal] = useState(null) // 'new' | { row }
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function reload() {
+    try { setRows(await fetchProfilesByRole(roles)) }
+    catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { reload() }, [roles.join(',')])
+
+  return (
+    <>
+      <div className="fbar">
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setModal('new')} className="rowflex"
+          style={{ gap: 6, padding: '8px 15px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <Plus size={16} /> Добавить
+        </button>
+      </div>
+
+      {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 11, marginBottom: 14, fontSize: 13 }}>{err}</div>}
+
+      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
+        {rows === null ? (
+          <div style={{ padding: 30, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: C.slate, fontSize: 14 }}>Пусто. Нажмите «Добавить».</div>
+        ) : rows.map((r, i) => (
+          <div key={r.id} className="rowflex lrow" style={{ gap: 11, padding: '10px 14px', borderTop: i ? `1px solid ${C.line}` : 'none', flexWrap: 'wrap' }}>
+            <div style={{ width: 32, height: 32, borderRadius: 9, background: avColorByIndex(i), color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12, flexShrink: 0 }}>
+              {initials(r.full_name)}
+            </div>
+            <div style={{ flex: 1, minWidth: 120 }}>
+              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{r.full_name || <span style={{ color: C.faint }}>без имени</span>}</div>
+              <div style={{ fontSize: 11.5, color: C.slate }}>
+                {ROLE_LABEL[r.role] || r.role}{r.role === 'office_manager' && r.office ? ` · ${r.office}` : ''}
+              </div>
+            </div>
+            <button onClick={() => setModal({ row: r })} disabled={busy} className="rowflex" title="Логин, пароль, доступ"
+              style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
+              <KeyRound size={13} /> <span className="hide-sm">Профиль</span>
+            </button>
+            <button onClick={() => setConfirmDelete(r)} disabled={busy} title="Удалить"
+              style={{ padding: 7, borderRadius: 8, color: '#dc2626', background: '#fee2e2', border: 'none', cursor: 'pointer' }}>
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <AccountOnlyModal
+          row={modal === 'new' ? null : modal.row}
+          roleOptions={roleOptions}
+          defaultRole={roleOptions[0]?.v}
+          onClose={() => setModal(null)}
+          onDone={async () => { setModal(null); await reload() }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title="Удалить учётку?"
+          message={`«${confirmDelete.full_name}» больше не сможет войти в систему. Действие необратимо.`}
+          confirmText="Удалить"
+          danger
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const r = confirmDelete; setConfirmDelete(null); setBusy(true)
+            try { await adminSoftDelete('accounts', r.id); await reload() }
+            catch (e) { setErr(e.message) } finally { setBusy(false) }
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+function AccountOnlyModal({ row, roleOptions, defaultRole, onClose, onDone }) {
+  const isNew = !row
+  const [fullName, setFullName] = useState(row?.full_name || '')
+  const [login, setLogin] = useState(isNew ? '' : row?.username || '')
+  const [pass, setPass] = useState(isNew ? genPassword() : '')
+  const [role, setRole] = useState(row?.role || defaultRole)
+  const [office, setOffice] = useState(row?.office || '')
+  const [info, setInfo] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    if (!isNew) {
+      getAccountInfo(row.id).then(setInfo).catch((e) => setErr(e.message))
+      if (!login) setLogin(loginFromName(row.full_name || ''))
+    }
+  }, [row])
+
+  async function create() {
+    if (!fullName.trim()) { setErr('Введите ФИО'); return }
+    if (!login.trim()) { setErr('Введите логин'); return }
+    if (!pass || pass.length < 4) { setErr('Пароль минимум 4 символа'); return }
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      await adminCreateAccount(null, null, login.trim().toLowerCase(), pass, role, fullName.trim(), role === 'office_manager' ? office : null)
+      setMsg('Учётка создана')
+      await onDone()
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  async function saveName() {
+    if (!fullName.trim()) { setErr('Введите ФИО'); return }
+    setBusy(true); setErr(''); setMsg('')
+    try { await adminUpdateProfileName(row.id, fullName.trim()); setMsg('ФИО обновлено') }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  async function savePassword() {
+    if (!pass || pass.length < 4) { setErr('Пароль минимум 4 символа'); return }
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      await adminSetPassword(row.id, pass)
+      setMsg('Пароль изменён'); setPass('')
+      setInfo(await getAccountInfo(row.id))
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  async function saveRole() {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      await adminSetRole(row.id, role, role === 'office_manager' ? office : null)
+      setMsg('Доступ обновлён')
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 60 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 460, padding: 24, maxHeight: '92vh', overflow: 'auto' }}>
+        <div className="rowflex" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{isNew ? 'Новая учётка' : 'Профиль сотрудника'}</h3>
+          <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={21} /></button>
+        </div>
+
+        {isNew ? (
+          <>
+            <Field label="ФИО"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Фамилия Имя" style={inp} autoFocus /></Field>
+            <Field label="Логин"><input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="напр. asaparova" style={inp} /></Field>
+            <Field label="Пароль">
+              <div className="rowflex" style={{ gap: 8 }}>
+                <input value={pass} onChange={(e) => setPass(e.target.value)} style={{ ...inp, flex: 1 }} />
+                <button onClick={() => setPass(genPassword())} type="button" title="Сгенерировать"
+                  style={{ padding: '0 14px', borderRadius: 11, background: C.grey, color: C.brand, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  Ещё
+                </button>
+              </div>
+            </Field>
+            {roleOptions.length > 1 && (
+              <Field label="Доступ (роль)">
+                <select value={role} onChange={(e) => setRole(e.target.value)} style={inp}>
+                  {roleOptions.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+                </select>
+              </Field>
+            )}
+            {role === 'office_manager' && (
+              <Field label="Офис">
+                <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
+                  <option value="">— выберите —</option>
+                  {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </Field>
+            )}
+            {login && pass && (
+              <div style={{ background: C.brandSoft, borderRadius: 11, padding: 12, fontSize: 13, color: C.ink, marginBottom: 4 }}>
+                Передайте сотруднику — логин: <b>{login}</b> · пароль: <b>{pass}</b>
+                <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>Запишите эти данные — после закрытия пароль не восстановить.</div>
+              </div>
+            )}
+            <button onClick={create} disabled={busy} className="rowflex"
+              style={{ width: '100%', justifyContent: 'center', gap: 6, padding: 12, background: C.brand, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
+              <Check size={16} /> {busy ? 'Создание…' : 'Создать учётку'}
+            </button>
+          </>
+        ) : (
+          <>
+            <Field label="ФИО">
+              <div className="rowflex" style={{ gap: 8 }}>
+                <input value={fullName} onChange={(e) => setFullName(e.target.value)} style={{ ...inp, flex: 1 }} />
+                <button onClick={saveName} disabled={busy} style={{ padding: '10px 14px', background: C.ink, color: '#fff', border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>Сохранить</button>
+              </div>
+            </Field>
+
+            <div style={{ background: C.grey, borderRadius: 12, padding: 14, margin: '12px 0' }}>
+              <div className="rowflex" style={{ gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: C.slate, width: 60 }}>Логин:</span>
+                <b style={{ fontSize: 14, fontFamily: 'monospace' }}>{info?.login || login || '—'}</b>
+              </div>
+              <div className="rowflex" style={{ gap: 8 }}>
+                <span style={{ fontSize: 12, color: C.slate, width: 60 }}>Пароль:</span>
+                <b style={{ fontSize: 14, fontFamily: 'monospace' }}>{info?.password || '—'}</b>
+              </div>
+            </div>
+
+            <Field label="Новый пароль">
+              <div className="rowflex" style={{ gap: 8 }}>
+                <input value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Введите новый пароль" style={inp} />
+                <button onClick={savePassword} disabled={busy} style={{ padding: '10px 14px', background: C.brand, color: '#fff', border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>Сменить</button>
+              </div>
+            </Field>
+
+            {roleOptions.length > 1 && (
+              <Field label="Доступ (роль)">
+                <select value={role} onChange={(e) => setRole(e.target.value)} style={inp}>
+                  {roleOptions.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+                </select>
+              </Field>
+            )}
+            {role === 'office_manager' && (
+              <Field label="Офис">
+                <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
+                  <option value="">— выберите —</option>
+                  {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </Field>
+            )}
+            <button onClick={saveRole} disabled={busy} className="rowflex"
+              style={{ width: '100%', justifyContent: 'center', gap: 6, padding: 11, background: C.ink, color: '#fff', border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
+              <ShieldCheck size={15} /> Сохранить доступ
+            </button>
+          </>
+        )}
+
+        {msg && <div style={{ color: C.ok, fontSize: 13, marginTop: 10, textAlign: 'center' }}>{msg}</div>}
+        {err && <div style={{ color: '#c2360b', fontSize: 13, marginTop: 10, textAlign: 'center' }}>{err}</div>}
+      </div>
+    </div>
+  )
+}
+
 export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
   const [name, setName] = useState(row?.full_name || '')
   const [school, setSchool] = useState(row?.school || '')
@@ -662,6 +932,7 @@ export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
   const [groupIds, setGroupIds] = useState(row?.groupIds || [])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [confirmDel, setConfirmDel] = useState(false)
   const valid = name.trim()
 
   async function save() {
@@ -685,6 +956,12 @@ export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
       else await addStudent(fields, groupIds)
       onDone()
     } catch (e) { setErr(e.message || 'Не удалось сохранить'); setBusy(false) }
+  }
+
+  async function remove() {
+    setBusy(true); setErr('')
+    try { await deleteStudent(row.id); onDone() }
+    catch (e) { setErr(e.message || 'Не удалось удалить'); setBusy(false) }
   }
 
   return (
@@ -746,6 +1023,25 @@ export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
           style={{ width: '100%', justifyContent: 'center', marginTop: 12, padding: 12, gap: 7, background: valid && !busy ? C.brand : C.line, color: valid && !busy ? '#fff' : C.slate, borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: valid && !busy ? 'pointer' : 'default' }}>
           <Check size={17} /> {busy ? 'Сохранение…' : 'Сохранить'}
         </button>
+
+        {row && (
+          confirmDel ? (
+            <div style={{ marginTop: 12, padding: 12, background: '#fdecec', borderRadius: 11 }}>
+              <div style={{ fontSize: 13, color: '#c2360b', marginBottom: 10 }}>
+                Удалить ученика? Он исчезнет из активных списков и из всех групп. История посещаемости и оплат сохранится.
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={remove} disabled={busy} style={{ flex: 1, padding: 10, background: '#dc2626', color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Да, удалить</button>
+                <button onClick={() => setConfirmDel(false)} style={{ flex: 1, padding: 10, background: C.grey, color: C.slate, borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Отмена</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDel(true)} className="rowflex"
+              style={{ width: '100%', justifyContent: 'center', marginTop: 10, padding: 11, gap: 7, background: 'none', color: '#dc2626', borderRadius: 11, fontSize: 13.5, fontWeight: 600, border: `1px solid #f3c9c9`, cursor: 'pointer' }}>
+              <Trash2 size={15} /> Удалить ученика
+            </button>
+          )
+        )}
       </div>
     </div>
   )

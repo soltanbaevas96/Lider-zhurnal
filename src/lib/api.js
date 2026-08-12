@@ -282,6 +282,15 @@ export async function updateStudent(id, fields, groupIds) {
   }
 }
 
+// Удалить ученика: архивировать карточку + убрать из всех групп.
+// Мягкое удаление — история посещаемости/оплат сохраняется, ученик
+// просто исчезает из активных списков и группы.
+export async function deleteStudent(id) {
+  await supabase.from('student_groups').delete().eq('student_id', id)
+  const { error } = await supabase.from('students').update({ archived: true }).eq('id', id)
+  if (error) throw error
+}
+
 // Добавить/убрать ученика в группе (по одной связи)
 export async function addStudentToGroup(studentId, groupId) {
   const { error } = await supabase.from('student_groups')
@@ -741,6 +750,18 @@ export async function adminSetRole(profileId, role, office) {
 export async function adminSoftDelete(kind, id) {
   const { error } = await supabase.rpc('admin_soft_delete', { p_kind: kind, p_id: id })
   if (error) throw error
+}
+export async function adminUpdateProfileName(profileId, fullName) {
+  const { error } = await supabase.rpc('admin_update_profile_name', { p_profile_id: profileId, p_full_name: fullName })
+  if (error) throw error
+}
+
+// Профили без отдельной карточки (office_manager/senior_office_manager/accountant) —
+// список читается напрямую: RLS уже разрешает admin читать все profiles.
+export async function fetchProfilesByRole(roles) {
+  const { data, error } = await supabase.from('profiles').select('*').in('role', roles).order('full_name')
+  if (error) throw error
+  return data || []
 }
 
 // Создание учётки (преподаватель/куратор/ассистент/любая роль) — через
