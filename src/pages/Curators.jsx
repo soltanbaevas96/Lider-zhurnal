@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Pencil, Archive, X, Download, GraduationCap, Wallet } from 'lucide-react'
+import { Plus, Pencil, Archive, X, Download, GraduationCap, Wallet, Lock, Unlock, AlertTriangle } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { fetchCurators, updateCuratorRate, addCurator, archiveCurator, fetchCuratorPayroll } from '../lib/api'
+import { fetchCurators, updateCuratorRate, addCurator, archiveCurator, fetchCuratorPayroll, closePayroll, reopenPayroll } from '../lib/api'
 import { C } from '../lib/utils'
 import DataTable from '../components/DataTable'
 
@@ -13,7 +13,11 @@ export default function Curators({ isAdmin, canEditRate, month }) {
   const [pay, setPay] = useState([])          // зарплата за выбранный месяц
   const [edit, setEdit] = useState(null)
   const [add, setAdd] = useState(false)
+  const [confirm, setConfirm] = useState(null) // 'close' | 'reopen'
+  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+
+  const isClosed = pay?.[0]?.is_closed || false
 
   async function load() {
     try {
@@ -25,6 +29,19 @@ export default function Curators({ isAdmin, canEditRate, month }) {
     } catch (e) { setErr(e.message) }
   }
   useEffect(() => { load() }, [month])
+
+  async function doClose() {
+    setBusy(true); setErr('')
+    try { await closePayroll(month); setConfirm(null); await load() }
+    catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+  async function doReopen() {
+    setBusy(true); setErr('')
+    try { await reopenPayroll(month); setConfirm(null); await load() }
+    catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
 
   // сводим ставку и начисление
   const payById = {}
@@ -60,7 +77,7 @@ export default function Curators({ isAdmin, canEditRate, month }) {
           {Number(c.rate) > 0
             ? <span>{money(c.rate)} ₸</span>
             : <span style={{ color: '#dc2626', fontWeight: 700 }}>не задана</span>}
-          {canEdit && (
+          {canEdit && !isClosed && (
             <button onClick={(e) => { e.stopPropagation(); setEdit(c) }} title="Изменить ставку"
               style={{ border: 'none', background: C.grey, color: C.slate, borderRadius: 6, padding: 4, cursor: 'pointer', display: 'flex' }}>
               <Pencil size={12} />
@@ -113,6 +130,29 @@ export default function Curators({ isAdmin, canEditRate, month }) {
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
+      {/* Статус периода — тот же месяц, что и у преподавателей (закрытие общее) */}
+      {isClosed ? (
+        <div className="rowflex" style={{ gap: 9, background: C.okSoft, border: `1px solid ${C.ok}33`, color: '#065f46', padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 14 }}>
+          <Lock size={15} />
+          <span><b>Месяц закрыт.</b> Суммы зафиксированы — изменение ставок их больше не затронет.</span>
+          {isAdmin && (
+            <button onClick={() => setConfirm('reopen')} className="rowflex"
+              style={{ marginLeft: 'auto', gap: 5, padding: '5px 11px', background: '#fff', color: C.slate, borderRadius: 7, fontSize: 12, fontWeight: 700, border: `1px solid ${C.line}`, cursor: 'pointer' }}>
+              <Unlock size={12} /> Открыть заново
+            </button>
+          )}
+        </div>
+      ) : month && isAdmin ? (
+        <div className="rowflex" style={{ gap: 9, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 14 }}>
+          <AlertTriangle size={15} />
+          <span>Месяц открыт — суммы пересчитываются при изменении ставок. Закройте его, когда всё проверено.</span>
+          <button onClick={() => setConfirm('close')} className="rowflex"
+            style={{ marginLeft: 'auto', gap: 5, padding: '6px 12px', background: C.brand, color: '#fff', borderRadius: 7, fontSize: 12.5, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            <Lock size={13} /> Закрыть месяц
+          </button>
+        </div>
+      ) : null}
+
       {/* Итоги за месяц */}
       {pay.length > 0 && (
         <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -156,6 +196,37 @@ export default function Curators({ isAdmin, canEditRate, month }) {
         onSaved={async () => { setEdit(null); await load() }} />}
       {add && <AddModal onClose={() => setAdd(false)}
         onSaved={async () => { setAdd(false); await load() }} />}
+
+      {confirm && (
+        <ConfirmBox
+          title={confirm === 'close' ? 'Закрыть месяц?' : 'Открыть месяц заново?'}
+          text={confirm === 'close'
+            ? 'Суммы за этот месяц будут зафиксированы (у преподавателей и кураторов сразу). Дальнейшее изменение ставок их не затронет. Это можно отменить.'
+            : 'Зафиксированные суммы будут удалены (у преподавателей и кураторов), месяц снова начнёт пересчитываться по текущим ставкам.'}
+          confirmText={confirm === 'close' ? 'Закрыть' : 'Открыть'}
+          busy={busy}
+          onCancel={() => setConfirm(null)}
+          onConfirm={confirm === 'close' ? doClose : doReopen}
+        />
+      )}
+    </div>
+  )
+}
+
+function ConfirmBox({ title, text, confirmText, busy, onCancel, onConfirm }) {
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 70 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 400, padding: 22 }}>
+        <h3 style={{ margin: '0 0 9px', fontSize: 17, fontWeight: 800 }}>{title}</h3>
+        <p style={{ fontSize: 13.5, color: C.slate, lineHeight: 1.5, margin: '0 0 18px' }}>{text}</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Отмена</button>
+          <button onClick={onConfirm} disabled={busy}
+            style={{ flex: 1, padding: 11, borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+            {busy ? '…' : confirmText}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
