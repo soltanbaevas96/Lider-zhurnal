@@ -78,10 +78,16 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
   })
 
   function exportAll() {
+    // Занятия куратора не привязаны к преподавателю/группе (это индивидуальные
+    // занятия с конкретными учениками) — раньше такие строки уходили в отчёт
+    // с «—» везде и выглядели как пустые. Показываем куратора и тип занятия.
     const rows = lessons.map((l) => ({
-      Дата: l.lesson_date, 
+      Дата: l.lesson_date,
+      Тип: l.curator_id ? 'Индивидуальное (куратор)' : 'Групповое',
       Уроков: lessonCount(l),
-      Преподаватель: nameOf(dict.teachers, l.teacher_id), Группа: nameOf(dict.groups, l.group_id),
+      Преподаватель: l.curator_id ? '—' : nameOf(dict.teachers, l.teacher_id),
+      Куратор: l.curator_id ? nameOf(dict.curators, l.curator_id) : '—',
+      Группа: nameOf(dict.groups, l.group_id),
       Ассистент: l.assistant_id ? nameOf(dict.assistants, l.assistant_id) : '—',
       Тема: l.topic, Учеников: l.students, Статус: l.status, 'План урока': l.plan_path ? 'есть' : 'нет',
     }))
@@ -89,6 +95,8 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Уроки')
     const summary = teacherStats.map((t) => ({ Преподаватель: t.full_name, Предметы: t.subjectsText, Уроков: t.hours, Групп: t.groups, 'Без плана': t.noPlan }))
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Сводка по преподавателям')
+    const curSummary = curatorStats.map((c) => ({ Куратор: c.full_name, Предмет: c.subject || '', Уроков: c.hours, Занятий: c.count }))
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(curSummary), 'Сводка по кураторам')
     const asst = []
     assistantStats.forEach((a) => {
       if (!a.count) { asst.push({ Ассистент: a.full_name, Преподаватель: '—', Занятий: 0, Уроков: 0 }); return }
