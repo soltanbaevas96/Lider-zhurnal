@@ -1,20 +1,22 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Clock, CheckCircle2, FileText, AlertTriangle, Users, Search, ChevronRight,
-  Download, ArrowLeft, UserCheck, ClipboardCheck, Plus, GraduationCap,
+  Download, ArrowLeft, UserCheck, ClipboardCheck, Plus, GraduationCap, Calendar, Trash2,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { C, lessonCount, nameOf, initials, avColorByIndex, periodRange } from '../lib/utils'
+import { C, lessonCount, nameOf, initials, avColorByIndex, periodRange, fmtDate } from '../lib/utils'
 import { Stat, MiniStat } from '../components/ui'
 import PeriodPicker from '../components/PeriodPicker'
 import LessonTable from '../components/LessonTable'
 import LessonForm from '../components/LessonForm'
 import AttendancePanel from './AttendancePanel'
+import { getCuratorLessons, deleteCuratorLesson } from '../lib/api'
 
 export default function AdminCabinet({ dict, lessons, period, setPeriod, periodLabel, onLessonChanged, onLessonDeleted }) {
   const [tab, setTab] = useState('teachers')
   const [q, setQ] = useState('')
   const [openTeacher, setOpenTeacher] = useState(null)
+  const [openCurator, setOpenCurator] = useState(null)
 
   const teacherStats = useMemo(() => dict.teachers.map((t, i) => {
     const done = lessons.filter((l) => l.teacher_id === t.id && l.status === 'проведён')
@@ -102,6 +104,10 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
     return <TeacherProfile t={t} dict={dict} lessons={lessons} periodLabel={periodLabel} onBack={() => setOpenTeacher(null)}
       onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
   }
+  if (openCurator) {
+    const c = curatorStats.find((x) => x.id === openCurator)
+    return <CuratorProfile c={c} period={period} periodLabel={periodLabel} onBack={() => setOpenCurator(null)} />
+  }
 
   return (
     <>
@@ -170,7 +176,8 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
           {curatorStats.length === 0 ? (
             <div style={{ color: C.slate, fontSize: 14, padding: 20 }}>Кураторов нет или они не загрузились.</div>
           ) : curatorStats.map((c) => (
-            <div key={c.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18 }}>
+            <button key={c.id} onClick={() => setOpenCurator(c.id)} className="card-hover"
+              style={{ textAlign: 'left', background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, display: 'block', cursor: 'pointer' }}>
               <div className="rowflex" style={{ marginBottom: 14 }}>
                 <div style={{ width: 46, height: 46, borderRadius: 13, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}>
                   <GraduationCap size={22} />
@@ -184,7 +191,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
                 <MiniStat value={c.hours} label="уроков" tint={C.brand} />
                 <MiniStat value={c.count} label="занятий" tint={C.ink} />
               </div>
-            </div>
+            </button>
           ))}
         </div>
       ) : (
@@ -317,6 +324,78 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
           onSaved={(l) => { setEditing(null); onLessonChanged(l) }}
           onDeleted={(id) => { setEditing(null); onLessonDeleted(id) }}
         />
+      )}
+    </>
+  )
+}
+
+// Профиль куратора: как у преподавателя, но занятия индивидуальные
+// (без групп, со списком учеников на каждом занятии).
+function CuratorProfile({ c, period, periodLabel, onBack }) {
+  const [lessons, setLessons] = useState(null)
+  const [err, setErr] = useState('')
+
+  async function reload() {
+    try {
+      const { from, to } = periodRange(period) || {}
+      setLessons(await getCuratorLessons(c.id, from, to))
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { reload() }, [c.id, period])
+
+  const hours = (lessons || []).reduce((s, l) => s + (l.lessons_count || 0), 0)
+  const noTopicCount = (lessons || []).filter((l) => !l.topic).length
+
+  async function remove(id) {
+    if (!confirm('Удалить это занятие?')) return
+    try { await deleteCuratorLesson(id); await reload() } catch (e) { setErr(e.message) }
+  }
+
+  return (
+    <>
+      <button onClick={onBack} className="rowflex" style={{ gap: 6, color: C.slate, fontSize: 13, fontWeight: 600, marginBottom: 16, border: 'none', background: 'none', cursor: 'pointer' }}>
+        <ArrowLeft size={16} /> Все кураторы
+      </button>
+
+      <div style={{ background: `linear-gradient(135deg,${C.brand},${C.brand2})`, borderRadius: 18, padding: 22, color: '#fff', marginBottom: 16 }}>
+        <div className="rowflex" style={{ gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ width: 60, height: 60, borderRadius: 16, background: 'rgba(255,255,255,.22)', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 20 }}>{initials(c.full_name)}</div>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: -0.4 }}>{c.full_name}</div>
+            <div style={{ fontSize: 13.5, opacity: 0.9, marginTop: 3 }}>куратор{c.subject ? ` · ${c.subject}` : ''}{c.phone ? ` · ${c.phone}` : ''}</div>
+          </div>
+        </div>
+        <div className="rowflex" style={{ gap: 24, marginTop: 20, flexWrap: 'wrap' }}>
+          <BigNum value={hours} label="уроков всего" />
+          <BigNum value={(lessons || []).length} label="занятий" />
+          <BigNum value={noTopicCount} label="без темы" warn={noTopicCount > 0} />
+        </div>
+      </div>
+
+      {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
+
+      {lessons === null ? (
+        <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+      ) : lessons.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, color: C.slate }}>
+          Занятий за «{periodLabel}» нет.
+        </div>
+      ) : (
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
+          {lessons.map((l, i) => (
+            <div key={l.id} style={{ padding: '14px 18px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+              <div className="rowflex" style={{ gap: 10, marginBottom: 6 }}>
+                <Calendar size={15} color={C.slate} />
+                <span style={{ fontSize: 13.5, fontWeight: 700 }}>{fmtDate(l.lesson_date)}</span>
+                <span style={{ fontSize: 12.5, color: C.brand, background: C.brandSoft, padding: '2px 10px', borderRadius: 20, fontWeight: 700 }}>{l.lessons_count} урок(а)</span>
+                <span style={{ fontSize: 12.5, color: C.slate }}><Users size={12} style={{ verticalAlign: 'middle' }} /> {l.student_count}</span>
+                <button onClick={() => remove(l.id)} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }} title="Удалить"><Trash2 size={14} /></button>
+              </div>
+              {l.topic && <div style={{ fontSize: 13.5, marginBottom: 3 }}>{l.topic}</div>}
+              <div style={{ fontSize: 12.5, color: C.slate }}>{l.student_names || '—'}</div>
+            </div>
+          ))}
+        </div>
       )}
     </>
   )

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { Users, User, TrendingDown } from 'lucide-react'
+import { Users, User, TrendingDown, ArrowLeft } from 'lucide-react'
 import { C, nameOf } from '../lib/utils'
 import { MiniStat } from '../components/ui'
 import { fetchAttendanceReport, fetchStudentsWithGroups } from '../lib/api'
@@ -22,6 +22,7 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
   const [students, setStudents] = useState([])
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
+  const [openGroup, setOpenGroup] = useState(null) // { id, name, pct, total, present }
 
   useEffect(() => {
     setLoading(true); setErr('')
@@ -50,7 +51,7 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
       if (!st) return { ...s, total: 0, present: 0, pct: null, groups: [] }
       const pct = st.total ? Math.round((st.present / st.total) * 100) : null
       const groups = Object.entries(st.groups).map(([gid, v]) => ({
-        name: nameOf(dict.groups, gid),
+        id: gid, name: nameOf(dict.groups, gid),
         total: v.total, present: v.present,
         pct: v.total ? Math.round((v.present / v.total) * 100) : null,
       })).sort((a, b) => (a.pct ?? 100) - (b.pct ?? 100))
@@ -81,6 +82,46 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
   if (loading) return <div style={{ padding: 30, textAlign: 'center', color: C.slate }}>Загрузка посещаемости…</div>
   if (err) return <div style={{ background: '#fde8e8', color: '#c2360b', padding: 14, borderRadius: 12, fontSize: 14 }}>{err}</div>
 
+  if (openGroup) {
+    const groupStudents = byStudent
+      .map((s) => ({ s, g: s.groups.find((x) => x.id === openGroup.id) }))
+      .filter((x) => x.g)
+      .sort((a, b) => (a.g.pct ?? 100) - (b.g.pct ?? 100))
+    return (
+      <>
+        <button onClick={() => setOpenGroup(null)} className="rowflex" style={{ gap: 6, color: C.slate, fontSize: 13, fontWeight: 600, marginBottom: 16, border: 'none', background: 'none', cursor: 'pointer' }}>
+          <ArrowLeft size={16} /> Все группы
+        </button>
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+          <div className="rowflex" style={{ gap: 14 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 13, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}><Users size={22} /></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{openGroup.name}</div>
+              <div style={{ fontSize: 13, color: C.slate, marginTop: 2 }}>{openGroup.present} из {openGroup.total} посещений · {groupStudents.length} учеников</div>
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: pctColor(openGroup.pct) }}>{openGroup.pct}%</div>
+          </div>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
+          {groupStudents.length === 0 ? (
+            <div style={{ padding: 30, textAlign: 'center', color: C.slate }}>Нет данных по ученикам этой группы за период.</div>
+          ) : groupStudents.map(({ s, g }, i) => (
+            <div key={s.id} className="rowflex" style={{ gap: 14, padding: '13px 16px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{s.full_name}</div>
+                <div style={{ fontSize: 12, color: C.slate }}>{g.present} из {g.total} занятий в этой группе</div>
+              </div>
+              <div style={{ width: 90, height: 6, background: C.grey, borderRadius: 3 }}>
+                <div style={{ width: `${g.pct}%`, height: '100%', background: pctColor(g.pct), borderRadius: 3 }} />
+              </div>
+              <span style={{ minWidth: 52, textAlign: 'right', fontWeight: 800, fontSize: 15, color: pctColor(g.pct) }}>{g.pct}%</span>
+            </div>
+          ))}
+        </div>
+      </>
+    )
+  }
+
   const empty = byGroup.length === 0 && byStudent.length === 0
 
   return (
@@ -105,7 +146,8 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
       ) : view === 'groups' ? (
         <div className="tgrid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
           {byGroup.map((g) => (
-            <div key={g.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18 }}>
+            <div key={g.id} onClick={() => setOpenGroup(g)} className="card-hover"
+              style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, cursor: 'pointer' }}>
               <div className="rowflex" style={{ marginBottom: 14 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, background: C.brandSoft, color: C.brand, display: 'grid', placeItems: 'center' }}><Users size={20} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
