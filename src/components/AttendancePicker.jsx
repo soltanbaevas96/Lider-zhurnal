@@ -25,7 +25,7 @@ export const REASONS = [
 export const reasonLabel = (k) => REASONS.find((r) => r.k === k)?.t || k
 export const statusLabel = (k) => ST.find((s) => s.k === k)?.t || k
 
-export default function AttendancePicker({ groupId, lessonId, onChange }) {
+export default function AttendancePicker({ groupId, lessonId, hasTest, onChange }) {
   const [students, setStudents] = useState(null)
   const [marks, setMarks] = useState({})
   const [err, setErr] = useState('')
@@ -41,7 +41,7 @@ export default function AttendancePicker({ groupId, lessonId, onChange }) {
         setStudents(list)
 
         const init = {}
-        list.forEach((s) => { init[s.id] = { status: 'present', reason: null } })
+        list.forEach((s) => { init[s.id] = { status: 'present', reason: null, score: '' } })
 
         if (lessonId) {
           const saved = await fetchAttendance(lessonId).catch(() => [])
@@ -49,6 +49,7 @@ export default function AttendancePicker({ groupId, lessonId, onChange }) {
             init[r.student_id] = {
               status: r.status || (r.present ? 'present' : 'absent'),
               reason: r.absence_reason || null,
+              score: r.score ?? '',
             }
           })
         }
@@ -69,14 +70,17 @@ export default function AttendancePicker({ groupId, lessonId, onChange }) {
         status: m.status,
         present: m.status !== 'absent',
         absence_reason: m.status === 'absent' ? (m.reason || null) : null,
+        score: hasTest && m.score !== '' ? Number(m.score) : null,
       }
     }))
-  }, [marks, students])
+  }, [marks, students, hasTest])
 
   const setStatus = (id, status) =>
-    setMarks((p) => ({ ...p, [id]: { status, reason: status === 'absent' ? p[id]?.reason : null } }))
+    setMarks((p) => ({ ...p, [id]: { ...p[id], status, reason: status === 'absent' ? p[id]?.reason : null } }))
   const setReason = (id, reason) =>
     setMarks((p) => ({ ...p, [id]: { ...p[id], reason } }))
+  const setScore = (id, score) =>
+    setMarks((p) => ({ ...p, [id]: { ...p[id], score } }))
 
   if (!groupId) return null
   if (err) return <div style={{ fontSize: 13, color: '#c2360b' }}>{err}</div>
@@ -152,6 +156,14 @@ export default function AttendancePicker({ groupId, lessonId, onChange }) {
                         }}>{r.t}</button>
                     )
                   })}
+                </div>
+              )}
+
+              {hasTest && (
+                <div className="rowflex" style={{ gap: 6, marginTop: 7 }}>
+                  <span style={{ fontSize: 11, color: C.slate }}>Балл за тест:</span>
+                  <input type="number" value={m.score ?? ''} onChange={(e) => setScore(s.id, e.target.value)}
+                    placeholder="—" style={{ width: 64, padding: '4px 8px', border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12.5, outline: 'none' }} />
                 </div>
               )}
             </div>

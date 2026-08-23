@@ -20,6 +20,8 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
     topic: lesson?.topic || '',
     students: lesson?.students ?? 8,
     status: lesson?.status || 'проведён',
+    has_test: lesson?.has_test || false,
+    test_max_score: lesson?.test_max_score || '',
   })
   const [showSecondAssistant, setShowSecondAssistant] = useState(!!lesson?.assistant2_id)
   const [file, setFile] = useState(null)
@@ -45,6 +47,8 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
         students: Number(f.students),
         status: f.status,
         plan_path,
+        has_test: f.has_test,
+        test_max_score: f.has_test ? (Number(f.test_max_score) || null) : null,
       }
       let saved
       if (editing) {
@@ -138,13 +142,26 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
         </Field>
 
         {f.status === 'проведён' && (
-          <Field label="Посещаемость">
-            <AttendancePicker
-              groupId={f.group_id}
-              lessonId={editing ? lesson.id : null}
-              onChange={(recs) => { setAttendance(recs); set('students', recs.filter((r) => r.present).length) }}
-            />
-          </Field>
+          <>
+            <label className="rowflex" style={{ gap: 8, cursor: 'pointer', marginBottom: 13 }}>
+              <input type="checkbox" checked={f.has_test} onChange={(e) => set('has_test', e.target.checked)} />
+              <span style={{ fontSize: 13.5, fontWeight: 600 }}>Было тестирование на уроке</span>
+            </label>
+            {f.has_test && (
+              <Field label="Максимум баллов за тест">
+                <input type="number" value={f.test_max_score} onChange={(e) => set('test_max_score', e.target.value)}
+                  placeholder="напр. 20" style={{ ...inp, maxWidth: 140 }} />
+              </Field>
+            )}
+            <Field label="Посещаемость">
+              <AttendancePicker
+                groupId={f.group_id}
+                lessonId={editing ? lesson.id : null}
+                hasTest={f.has_test}
+                onChange={(recs) => { setAttendance(recs); set('students', recs.filter((r) => r.present).length) }}
+              />
+            </Field>
+          </>
         )}
         <Field label="План урока">
           <label className="rowflex" style={{ gap: 8, padding: '10px 12px', border: `1px dashed ${C.line}`, borderRadius: 11, fontSize: 13, color: C.slate, cursor: 'pointer' }}>

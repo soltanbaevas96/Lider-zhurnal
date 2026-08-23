@@ -40,6 +40,13 @@ export async function fetchLessons(period) {
   return data
 }
 
+// Было ли тестирование на уроке и с каким максимумом (для повторного открытия «Провести занятие»)
+export async function fetchLessonTestInfo(lessonId) {
+  const { data, error } = await supabase.from('lessons').select('has_test, test_max_score').eq('id', lessonId).maybeSingle()
+  if (error) throw error
+  return data || { has_test: false, test_max_score: null }
+}
+
 export async function createLesson(payload) {
   const { data, error } = await supabase.from('lessons').insert(payload).select().single()
   if (error) throw error
@@ -205,7 +212,7 @@ export async function fetchStudentsOfGroup(groupId) {
 export async function fetchAttendance(lessonId) {
   const { data, error } = await supabase
     .from('attendance')
-    .select('student_id, present, absence_reason')
+    .select('student_id, present, absence_reason, score')
     .eq('lesson_id', lessonId)
   if (error) throw error
   return data
@@ -220,10 +227,23 @@ export async function saveAttendance(lessonId, records) {
       student_id: r.student_id,
       present: r.present,
       absence_reason: r.present ? null : (r.absence_reason || null),
+      score: r.score ?? null,
     }))
     const { error } = await supabase.from('attendance').insert(rows)
     if (error) throw error
   }
+}
+
+// ---------- РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ----------
+export async function fetchStudentTestScores(studentId) {
+  const { data, error } = await supabase.rpc('get_student_test_scores', { p_student_id: studentId })
+  if (error) throw error
+  return data || []
+}
+export async function fetchGroupTestScores(groupId) {
+  const { data, error } = await supabase.rpc('get_group_test_scores', { p_group_id: groupId })
+  if (error) throw error
+  return data || []
 }
 
 // Вся посещаемость за период (для контроля у завуча).
@@ -582,14 +602,16 @@ export async function fetchMissedLessons(days = 14) {
   return data || []
 }
 
-// Провести занятие: тема + посещаемость + статус
-export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance }) {
+// Провести занятие: тема + посещаемость + статус (+ баллы за тест, если был)
+export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance, has_test, test_max_score }) {
   const { error: le } = await supabase.from('lessons').update({
     topic: topic || '',
     comment: comment || null,
     lessons_count: Number(lessons_count) || 2,
     status: 'проведён',
     conducted_at: new Date().toISOString(),
+    has_test: !!has_test,
+    test_max_score: has_test ? (Number(test_max_score) || null) : null,
   }).eq('id', lessonId)
   if (le) throw le
 
@@ -601,6 +623,7 @@ export async function conductLesson(lessonId, { topic, comment, lessons_count, a
       status: a.status || 'present',
       present: a.status !== 'absent',           // совместимость со старой логикой
       absence_reason: a.status === 'absent' ? (a.absence_reason || null) : null,
+      score: has_test && a.score !== '' && a.score != null ? Number(a.score) : null,
     }))
     const { error } = await supabase.from('attendance').insert(rows)
     if (error) throw error

@@ -9,7 +9,7 @@ import {
 } from 'recharts'
 import {
   fetchStudent, fetchStudentCalendar, fetchStudentSummary, fetchStudentGroupsStats, fetchStudentEvents,
-  fetchCommunications, addCommunication,
+  fetchCommunications, addCommunication, fetchStudentTestScores,
 } from '../lib/api'
 import { C, fmtDate } from '../lib/utils'
 import DataTable from '../components/DataTable'
@@ -33,6 +33,7 @@ export default function StudentCard({ studentId, onBack }) {
   const [groups, setGroups] = useState([])
   const [events, setEvents] = useState([])
   const [comms, setComms] = useState([])
+  const [testScores, setTestScores] = useState([])
   const [addComm, setAddComm] = useState(false)
   const [view, setView] = useState('calendar') // calendar | list
   const [loading, setLoading] = useState(true)
@@ -54,9 +55,10 @@ export default function StudentCard({ studentId, onBack }) {
       fetchStudentGroupsStats(studentId, range.from, range.to),
       fetchStudentEvents(studentId).catch(() => []),
       fetchCommunications(studentId).catch(() => []),
+      fetchStudentTestScores(studentId).catch(() => []),
     ])
-      .then(([st, cal, sum, grp, ev, cm]) => {
-        setStudent(st); setCalendar(cal); setSummary(sum); setGroups(grp); setEvents(ev); setComms(cm)
+      .then(([st, cal, sum, grp, ev, cm, tests]) => {
+        setStudent(st); setCalendar(cal); setSummary(sum); setGroups(grp); setEvents(ev); setComms(cm); setTestScores(tests)
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -201,6 +203,28 @@ export default function StudentCard({ studentId, onBack }) {
             ]}
             rows={groups.map((g) => ({ ...g, id: g.group_id }))}
             pageSize={15}
+          />
+        </div>
+      )}
+
+      {/* ---------- РЕЗУЛЬТАТЫ ТЕСТОВ ---------- */}
+      {testScores.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <h2 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 800 }}>Результаты тестов</h2>
+          <DataTable
+            columns={[
+              { key: 'lesson_date', label: 'Дата', render: (t) => fmtDate(t.lesson_date) },
+              { key: 'group_name', label: 'Группа', render: (t) => t.group_name || '—' },
+              { key: 'subject_name', label: 'Предмет', render: (t) => t.subject_name || '—' },
+              { key: 'topic', label: 'Тема', render: (t) => t.topic || '—' },
+              { key: 'score', label: 'Баллы', num: true, render: (t) =>
+                t.score != null ? <b>{t.score}{t.max_score != null ? ` / ${t.max_score}` : ''}</b> : <span style={{ color: C.faint }}>не сдавал</span> },
+              { key: 'pct', label: '%', num: true, render: (t) =>
+                t.pct != null ? <span style={{ color: pctColor(t.pct), fontWeight: 800 }}>{t.pct}%</span> : '—' },
+            ]}
+            rows={testScores.map((t) => ({ ...t, id: t.lesson_id }))}
+            pageSize={15}
+            initialSort={{ key: 'lesson_date', dir: 'desc' }}
           />
         </div>
       )}

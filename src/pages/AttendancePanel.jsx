@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { Users, User, TrendingDown, ArrowLeft } from 'lucide-react'
-import { C, nameOf } from '../lib/utils'
+import { C, nameOf, fmtDate } from '../lib/utils'
 import { MiniStat } from '../components/ui'
-import { fetchAttendanceReport, fetchStudentsWithGroups } from '../lib/api'
+import { fetchAttendanceReport, fetchStudentsWithGroups, fetchGroupTestScores } from '../lib/api'
 
 // Цвет по проценту посещаемости
 function pctColor(pct) {
@@ -23,6 +23,30 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [openGroup, setOpenGroup] = useState(null) // { id, name, pct, total, present }
+  const [groupTests, setGroupTests] = useState(null)
+  const [openTest, setOpenTest] = useState(null) // конкретный тест (lesson_id) для раскрытия по ученикам
+
+  useEffect(() => {
+    if (!openGroup) { setGroupTests(null); setOpenTest(null); return }
+    setGroupTests(null)
+    fetchGroupTestScores(openGroup.id).then(setGroupTests).catch(() => setGroupTests([]))
+  }, [openGroup])
+
+  // Группируем плоский список (тест × ученик) по тестам (lesson_id)
+  const testsByLesson = useMemo(() => {
+    if (!groupTests) return []
+    const m = {}
+    groupTests.forEach((r) => {
+      const t = (m[r.lesson_id] ||= { lesson_id: r.lesson_id, lesson_date: r.lesson_date, topic: r.topic, max_score: r.max_score, students: [] })
+      t.students.push({ id: r.student_id, name: r.student_name, score: r.score })
+    })
+    return Object.values(m).map((t) => {
+      const scored = t.students.filter((s) => s.score != null)
+      const avg = scored.length ? scored.reduce((s, x) => s + Number(x.score), 0) / scored.length : null
+      const avgPct = avg != null && t.max_score > 0 ? Math.round((avg / t.max_score) * 100) : null
+      return { ...t, avg, avgPct, took: scored.length }
+    }).sort((a, b) => b.lesson_date.localeCompare(a.lesson_date))
+  }, [groupTests])
 
   useEffect(() => {
     setLoading(true); setErr('')
@@ -118,6 +142,48 @@ export default function AttendancePanel({ dict, periodRange, periodLabel }) {
             </div>
           ))}
         </div>
+
+        {/* Результаты тестов группы */}
+        {groupTests === null ? (
+          <div style={{ padding: 20, textAlign: 'center', color: C.slate, fontSize: 13 }}>Загрузка тестов…</div>
+        ) : testsByLesson.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <h2 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 800 }}>Результаты тестов</h2>
+            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
+              {testsByLesson.map((t, i) => {
+                const expanded = openTest === t.lesson_id
+                return (
+                  <div key={t.lesson_id} style={{ borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+                    <div onClick={() => setOpenTest(expanded ? null : t.lesson_id)}
+                      className="rowflex" style={{ gap: 14, padding: '13px 16px', cursor: 'pointer' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtDate(t.lesson_date)}{t.topic ? ` · ${t.topic}` : ''}</div>
+                        <div style={{ fontSize: 12, color: C.slate }}>
+                          {t.took} из {t.students.length} сдавали{t.max_score != null ? ` · максимум ${t.max_score}` : ''}
+                        </div>
+                      </div>
+                      {t.avgPct != null && (
+                        <span style={{ fontWeight: 800, fontSize: 15, color: pctColor(t.avgPct) }}>{t.avgPct}% ср.</span>
+                      )}
+                    </div>
+                    {expanded && (
+                      <div style={{ padding: '0 16px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {t.students.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).map((s) => (
+                          <div key={s.id} className="rowflex" style={{ gap: 8, fontSize: 12.5 }}>
+                            <span style={{ flex: 1, minWidth: 0, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
+                            <span style={{ fontWeight: 700, color: s.score != null ? C.ink : C.faint }}>
+                              {s.score != null ? `${s.score}${t.max_score != null ? ` / ${t.max_score}` : ''}` : 'не сдавал'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </>
     )
   }

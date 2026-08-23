@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Check, X, Clock, Wifi, RotateCcw, ArrowLeft, Ban,
 } from 'lucide-react'
-import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, conductLesson, cancelLesson } from '../lib/api'
+import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, fetchLessonTestInfo, conductLesson, cancelLesson } from '../lib/api'
 import { ST, REASONS } from '../components/AttendancePicker'
 import { C } from '../lib/utils'
 
@@ -128,6 +128,8 @@ function ConductCard({ lesson, onBack, onDone }) {
   const [topic, setTopic] = useState(lesson.topic || '')
   const [comment, setComment] = useState('')
   const [count, setCount] = useState(lesson.lessons_count || 2)
+  const [hasTest, setHasTest] = useState(false)
+  const [maxScore, setMaxScore] = useState('')
   const [busy, setBusy] = useState(false)
   const [cancelMode, setCancelMode] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -138,15 +140,19 @@ function ConductCard({ lesson, onBack, onDone }) {
     Promise.all([
       fetchStudentsOfGroup(lesson.group_id),
       fetchAttendance(lesson.lesson_id).catch(() => []),
-    ]).then(([list, saved]) => {
+      fetchLessonTestInfo(lesson.lesson_id).catch(() => ({ has_test: false, test_max_score: null })),
+    ]).then(([list, saved, testInfo]) => {
       if (stop) return
       setStudents(list)
+      setHasTest(!!testInfo.has_test)
+      setMaxScore(testInfo.test_max_score ?? '')
       const init = {}
-      list.forEach((s) => { init[s.id] = { status: 'present', reason: null } })
+      list.forEach((s) => { init[s.id] = { status: 'present', reason: null, score: '' } })
       saved.forEach((a) => {
         init[a.student_id] = {
           status: a.status || (a.present ? 'present' : 'absent'),
           reason: a.absence_reason || null,
+          score: a.score ?? '',
         }
       })
       setMarks(init)
@@ -155,9 +161,11 @@ function ConductCard({ lesson, onBack, onDone }) {
   }, [lesson])
 
   const setStatus = (id, status) =>
-    setMarks((p) => ({ ...p, [id]: { status, reason: status === 'absent' ? p[id]?.reason : null } }))
+    setMarks((p) => ({ ...p, [id]: { ...p[id], status, reason: status === 'absent' ? p[id]?.reason : null } }))
   const setReason = (id, reason) =>
     setMarks((p) => ({ ...p, [id]: { ...p[id], reason } }))
+  const setScore = (id, score) =>
+    setMarks((p) => ({ ...p, [id]: { ...p[id], score } }))
 
   async function save() {
     // проверка: у отсутствующих должна быть причина
@@ -172,10 +180,13 @@ function ConductCard({ lesson, onBack, onDone }) {
     try {
       await conductLesson(lesson.lesson_id, {
         topic, comment, lessons_count: count,
+        has_test: hasTest,
+        test_max_score: hasTest ? (Number(maxScore) || null) : null,
         attendance: (students || []).map((s) => ({
           student_id: s.id,
           status: marks[s.id]?.status || 'present',
           absence_reason: marks[s.id]?.reason || null,
+          score: marks[s.id]?.score,
         })),
       })
       await onDone()
@@ -233,6 +244,20 @@ function ConductCard({ lesson, onBack, onDone }) {
               ))}
             </div>
           </div>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <label className="rowflex" style={{ gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={hasTest} onChange={(e) => setHasTest(e.target.checked)} />
+            <span style={{ fontSize: 13.5, fontWeight: 600 }}>Было тестирование на уроке</span>
+          </label>
+          {hasTest && (
+            <div style={{ marginTop: 8, maxWidth: 160 }}>
+              <Label>Максимум баллов за тест</Label>
+              <input type="number" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} placeholder="напр. 20"
+                style={{ width: '100%', padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13.5, outline: 'none' }} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -296,6 +321,14 @@ function ConductCard({ lesson, onBack, onDone }) {
                           }}>{r.t}</button>
                       )
                     })}
+                  </div>
+                )}
+
+                {hasTest && (
+                  <div className="rowflex" style={{ gap: 6, marginTop: 8, paddingLeft: 2 }}>
+                    <span style={{ fontSize: 11.5, color: C.slate }}>Балл за тест:</span>
+                    <input type="number" value={m.score ?? ''} onChange={(e) => setScore(s.id, e.target.value)}
+                      placeholder="—" style={{ width: 68, padding: '4px 8px', border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12.5, outline: 'none' }} />
                   </div>
                 )}
               </div>
