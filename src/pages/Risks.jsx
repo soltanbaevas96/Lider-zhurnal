@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Download, Phone, RefreshCw, MessageCircle, X, ShieldCheck } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { fetchRiskStudents, recalcRiskFlags, saveContact } from '../lib/api'
-import { C, fmtDate } from '../lib/utils'
+import { C, fmtDate, OFFICES } from '../lib/utils'
 import DataTable from '../components/DataTable'
 
 export default function Risks({ onOpenStudent }) {
@@ -63,7 +63,6 @@ export default function Risks({ onOpenStudent }) {
       render: (s) => <b style={{ color: C.brand }}>{s.full_name}</b>,
     },
     { key: 'risk_reason', label: 'Причина', render: (s) => s.risk_reason || '—' },
-    { key: 'office', label: 'Офис', render: (s) => s.office || '—' },
     { key: 'lang', label: 'Язык', width: 60, render: (s) => s.lang || '—' },
     {
       key: 'parent_phone', label: 'Родитель', sortable: false,
@@ -94,6 +93,20 @@ export default function Risks({ onOpenStudent }) {
 
   const riskCount = visible.filter((s) => s.status === 'risk').length
   const attnCount = visible.filter((s) => s.status === 'attention').length
+
+  // группировка по офисам: сначала известные офисы по порядку, потом остальное
+  const officeGroups = useMemo(() => {
+    const m = {}
+    visible.forEach((s) => {
+      const o = s.office || 'Без офиса'
+      ;(m[o] ||= []).push(s)
+    })
+    const order = [...OFFICES, 'Без офиса']
+    const known = order.filter((o) => m[o]?.length).map((o) => [o, m[o]])
+    const rest = Object.keys(m).filter((o) => !order.includes(o)).sort()
+      .map((o) => [o, m[o]])
+    return [...known, ...rest]
+  }, [visible])
 
   return (
     <div>
@@ -135,8 +148,26 @@ export default function Risks({ onOpenStudent }) {
           </div>
         </div>
       ) : (
-        <DataTable columns={columns} rows={visible} pageSize={25}
-          onRowClick={(s) => onOpenStudent?.(s.id)} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {officeGroups.map(([office, students]) => {
+            const r = students.filter((s) => s.status === 'risk').length
+            const a = students.filter((s) => s.status === 'attention').length
+            return (
+              <div key={office}>
+                <div className="rowflex" style={{ gap: 10, marginBottom: 9 }}>
+                  <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>{office}</h2>
+                  <span style={{ fontSize: 12, color: C.faint }}>{students.length} чел.</span>
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+                    {r > 0 && <MiniBadge n={r} color="#dc2626" bg="#fee2e2" />}
+                    {a > 0 && <MiniBadge n={a} color="#d97706" bg="#fef3c7" />}
+                  </div>
+                </div>
+                <DataTable columns={columns} rows={students} pageSize={25}
+                  onRowClick={(s) => onOpenStudent?.(s.id)} />
+              </div>
+            )
+          })}
+        </div>
       )}
 
       {contact && (
@@ -153,6 +184,14 @@ function Counter({ n, label, color, bg }) {
       <span style={{ fontSize: 20, fontWeight: 800, color }}>{n}</span>
       <span style={{ fontSize: 12.5, color, fontWeight: 600 }}>{label}</span>
     </div>
+  )
+}
+
+function MiniBadge({ n, color, bg }) {
+  return (
+    <span style={{ fontSize: 11.5, fontWeight: 800, color, background: bg, padding: '2px 8px', borderRadius: 20 }}>
+      {n}
+    </span>
   )
 }
 
