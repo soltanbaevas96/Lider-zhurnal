@@ -225,6 +225,7 @@ export async function saveAttendance(lessonId, records) {
     const rows = records.map((r) => ({
       lesson_id: lessonId,
       student_id: r.student_id,
+      status: r.status || (r.present ? 'present' : 'absent'),
       present: r.present,
       absence_reason: r.present ? null : (r.absence_reason || null),
       score: r.score ?? null,
