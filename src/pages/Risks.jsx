@@ -10,6 +10,7 @@ export default function Risks({ onOpenStudent }) {
   const [busy, setBusy] = useState(false)
   const [contact, setContact] = useState(null) // ученик для фиксации контакта
   const [err, setErr] = useState('')
+  const [officeTab, setOfficeTab] = useState('all')
 
   async function load() {
     try { setRows(await fetchRiskStudents()) }
@@ -63,6 +64,7 @@ export default function Risks({ onOpenStudent }) {
       render: (s) => <b style={{ color: C.brand }}>{s.full_name}</b>,
     },
     { key: 'risk_reason', label: 'Причина', render: (s) => s.risk_reason || '—' },
+    ...(officeTab === 'all' ? [{ key: 'office', label: 'Офис', render: (s) => s.office || '—' }] : []),
     { key: 'lang', label: 'Язык', width: 60, render: (s) => s.lang || '—' },
     {
       key: 'parent_phone', label: 'Родитель', sortable: false,
@@ -94,19 +96,14 @@ export default function Risks({ onOpenStudent }) {
   const riskCount = visible.filter((s) => s.status === 'risk').length
   const attnCount = visible.filter((s) => s.status === 'attention').length
 
-  // группировка по офисам: сначала известные офисы по порядку, потом остальное
-  const officeGroups = useMemo(() => {
-    const m = {}
-    visible.forEach((s) => {
-      const o = s.office || 'Без офиса'
-      ;(m[o] ||= []).push(s)
-    })
-    const order = [...OFFICES, 'Без офиса']
-    const known = order.filter((o) => m[o]?.length).map((o) => [o, m[o]])
-    const rest = Object.keys(m).filter((o) => !order.includes(o)).sort()
-      .map((o) => [o, m[o]])
-    return [...known, ...rest]
+  // вкладки: «Все офисы» + сами офисы, с числом учеников на каждой
+  const officeTabs = useMemo(() => {
+    const tabs = [{ k: 'all', t: 'Все офисы', n: visible.length }]
+    OFFICES.forEach((o) => tabs.push({ k: o, t: o, n: visible.filter((s) => s.office === o).length }))
+    return tabs
   }, [visible])
+
+  const tabRows = officeTab === 'all' ? visible : visible.filter((s) => s.office === officeTab)
 
   return (
     <div>
@@ -137,6 +134,27 @@ export default function Risks({ onOpenStudent }) {
         <Counter n={attnCount} label="внимание" color="#d97706" bg="#fef3c7" />
       </div>
 
+      {/* Вкладки офисов */}
+      <div style={{ display: 'flex', gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
+        {officeTabs.map((o) => {
+          const on = officeTab === o.k
+          return (
+            <button key={o.k} onClick={() => setOfficeTab(o.k)} className="rowflex"
+              style={{
+                gap: 6, padding: '8px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+                border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate,
+              }}>
+              {o.t}
+              <span style={{
+                fontSize: 11, fontWeight: 800, padding: '1px 6px', borderRadius: 20,
+                background: on ? 'rgba(255,255,255,.25)' : C.grey, color: on ? '#fff' : C.faint,
+              }}>{o.n}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {rows === null ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка…</div>
       ) : visible.length === 0 ? (
@@ -147,27 +165,13 @@ export default function Risks({ onOpenStudent }) {
             Флаги считаются по пропускам и посещаемости. Появятся, когда начнутся занятия.
           </div>
         </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          {officeGroups.map(([office, students]) => {
-            const r = students.filter((s) => s.status === 'risk').length
-            const a = students.filter((s) => s.status === 'attention').length
-            return (
-              <div key={office}>
-                <div className="rowflex" style={{ gap: 10, marginBottom: 9 }}>
-                  <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>{office}</h2>
-                  <span style={{ fontSize: 12, color: C.faint }}>{students.length} чел.</span>
-                  <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-                    {r > 0 && <MiniBadge n={r} color="#dc2626" bg="#fee2e2" />}
-                    {a > 0 && <MiniBadge n={a} color="#d97706" bg="#fef3c7" />}
-                  </div>
-                </div>
-                <DataTable columns={columns} rows={students} pageSize={25}
-                  onRowClick={(s) => onOpenStudent?.(s.id)} />
-              </div>
-            )
-          })}
+      ) : tabRows.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: C.slate, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
+          В офисе «{officeTab}» учеников в зоне риска нет.
         </div>
+      ) : (
+        <DataTable columns={columns} rows={tabRows} pageSize={25}
+          onRowClick={(s) => onOpenStudent?.(s.id)} />
       )}
 
       {contact && (
@@ -184,14 +188,6 @@ function Counter({ n, label, color, bg }) {
       <span style={{ fontSize: 20, fontWeight: 800, color }}>{n}</span>
       <span style={{ fontSize: 12.5, color, fontWeight: 600 }}>{label}</span>
     </div>
-  )
-}
-
-function MiniBadge({ n, color, bg }) {
-  return (
-    <span style={{ fontSize: 11.5, fontWeight: 800, color, background: bg, padding: '2px 8px', borderRadius: 20 }}>
-      {n}
-    </span>
   )
 }
 
