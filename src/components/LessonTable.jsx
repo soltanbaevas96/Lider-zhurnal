@@ -39,6 +39,7 @@ export default function LessonTable({ lessons, dict, showTeacher, onEdit }) {
                 <span className="rowflex" style={{ gap: 3 }}><Users size={12} /> {nameOf(dict.groups, l.group_id)} · {l.students}</span>
                 <span className="rowflex" style={{ gap: 3 }}><Clock size={12} /> {h} {h === 1 ? 'урок' : 'урока'}</span>
                 {l.assistant_id && <span className="rowflex" style={{ gap: 3, color: C.teal }}><UserCheck size={12} /> {nameOf(dict.assistants, l.assistant_id)}</span>}
+                {l.assistant2_id && <span className="rowflex" style={{ gap: 3, color: C.teal }}><UserCheck size={12} /> {nameOf(dict.assistants, l.assistant2_id)}</span>}
               </div>
             </div>
             {cancelled

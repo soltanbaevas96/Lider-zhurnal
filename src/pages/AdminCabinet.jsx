@@ -12,6 +12,12 @@ import LessonForm from '../components/LessonForm'
 import AttendancePanel from './AttendancePanel'
 import { getCuratorLessons, deleteCuratorLesson } from '../lib/api'
 
+// Имена одного или двух ассистентов урока через запятую (или '—')
+function assistantNames(l, dict) {
+  const names = [l.assistant_id, l.assistant2_id].filter(Boolean).map((id) => nameOf(dict.assistants, id))
+  return names.length ? names.join(', ') : '—'
+}
+
 export default function AdminCabinet({ dict, lessons, period, setPeriod, periodLabel, onLessonChanged, onLessonDeleted }) {
   const [tab, setTab] = useState('teachers')
   const [q, setQ] = useState('')
@@ -36,7 +42,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
   }), [dict.teachers, dict.subjectsByTeacher, dict.subjects, lessons])
 
   const assistantStats = useMemo(() => dict.assistants.map((a) => {
-    const done = lessons.filter((l) => l.assistant_id === a.id && l.status === 'проведён')
+    const done = lessons.filter((l) => (l.assistant_id === a.id || l.assistant2_id === a.id) && l.status === 'проведён')
     const withT = {}
     done.forEach((l) => {
       withT[l.teacher_id] = withT[l.teacher_id] || { count: 0, hours: 0 }
@@ -88,7 +94,7 @@ export default function AdminCabinet({ dict, lessons, period, setPeriod, periodL
       Преподаватель: l.curator_id ? '—' : nameOf(dict.teachers, l.teacher_id),
       Куратор: l.curator_id ? nameOf(dict.curators, l.curator_id) : '—',
       Группа: nameOf(dict.groups, l.group_id),
-      Ассистент: l.assistant_id ? nameOf(dict.assistants, l.assistant_id) : '—',
+      Ассистент: assistantNames(l, dict),
       Тема: l.topic, Учеников: l.students, Статус: l.status, 'План урока': l.plan_path ? 'есть' : 'нет',
     }))
     const wb = XLSX.utils.book_new()
@@ -262,7 +268,7 @@ function TeacherProfile({ t, dict, lessons, periodLabel, onBack, onLessonChanged
     const rows = own.map((l) => ({
       Дата: l.lesson_date, 
       Уроков: lessonCount(l), Группа: nameOf(dict.groups, l.group_id),
-      Ассистент: l.assistant_id ? nameOf(dict.assistants, l.assistant_id) : '—',
+      Ассистент: assistantNames(l, dict),
       Тема: l.topic, Учеников: l.students, Статус: l.status, План: l.plan_path ? 'есть' : 'нет',
     }))
     const wb = XLSX.utils.book_new()

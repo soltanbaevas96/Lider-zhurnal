@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Paperclip, Trash2 } from 'lucide-react'
+import { X, Paperclip, Trash2, Plus } from 'lucide-react'
 import { C } from '../lib/utils'
 import { inp, Field } from './ui'
 import { createLesson, updateLesson, deleteLesson, uploadPlan, saveAttendance } from '../lib/api'
@@ -14,12 +14,14 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
   const [f, setF] = useState({
     group_id: lesson?.group_id || dict.groups[0]?.id || '',
     assistant_id: lesson?.assistant_id || '',
+    assistant2_id: lesson?.assistant2_id || '',
     lesson_date: lesson?.lesson_date || today,
     lessons_count: lesson?.lessons_count || 1,
     topic: lesson?.topic || '',
     students: lesson?.students ?? 8,
     status: lesson?.status || 'проведён',
   })
+  const [showSecondAssistant, setShowSecondAssistant] = useState(!!lesson?.assistant2_id)
   const [file, setFile] = useState(null)
   const [attendance, setAttendance] = useState([]) // [{ student_id, present }]
   const [saving, setSaving] = useState(false)
@@ -36,6 +38,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
       const payload = {
         group_id: f.group_id,
         assistant_id: f.assistant_id || null,
+        assistant2_id: f.assistant2_id || null,
         lesson_date: f.lesson_date,
         lessons_count: Number(f.lessons_count),
         topic: f.topic.trim(),
@@ -86,9 +89,30 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
         <Field label="Ассистент на уроке">
           <select value={f.assistant_id} onChange={(e) => set('assistant_id', e.target.value)} style={inp}>
             <option value="">Без ассистента</option>
-            {dict.assistants.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+            {dict.assistants.filter((a) => a.id !== f.assistant2_id).map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
           </select>
         </Field>
+
+        {showSecondAssistant ? (
+          <Field label="Второй ассистент">
+            <div className="rowflex" style={{ gap: 8 }}>
+              <select value={f.assistant2_id} onChange={(e) => set('assistant2_id', e.target.value)} style={{ ...inp, flex: 1 }}>
+                <option value="">Без второго ассистента</option>
+                {dict.assistants.filter((a) => a.id !== f.assistant_id).map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+              </select>
+              <button type="button" onClick={() => { set('assistant2_id', ''); setShowSecondAssistant(false) }}
+                title="Убрать второго ассистента"
+                style={{ border: 'none', background: C.grey, color: C.slate, borderRadius: 9, padding: '0 12px', cursor: 'pointer' }}>
+                <X size={15} />
+              </button>
+            </div>
+          </Field>
+        ) : (
+          <button type="button" onClick={() => setShowSecondAssistant(true)} className="rowflex"
+            style={{ gap: 6, background: 'none', border: 'none', color: C.brand, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', padding: 0, marginBottom: 13 }}>
+            <Plus size={14} /> Добавить второго ассистента
+          </button>
+        )}
         <Field label="Дата"><input type="date" value={f.lesson_date} onChange={(e) => set('lesson_date', e.target.value)} style={inp} /></Field>
         <Field label="Сколько уроков проведено">
           <div style={{ display: 'flex', gap: 8 }}>

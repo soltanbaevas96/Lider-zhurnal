@@ -55,7 +55,7 @@ export default function Timesheets({ dict, onOpenStudent }) {
   // ---------- ТАБЕЛЬ АССИСТЕНТОВ ----------
   const assistantRows = useMemo(() => {
     return (dict.assistants || []).map((a) => {
-      const mine = doneLessons.filter((l) => l.assistant_id === a.id)
+      const mine = doneLessons.filter((l) => l.assistant_id === a.id || l.assistant2_id === a.id)
       const lessonsSum = mine.reduce((s, l) => s + lessonCount(l), 0)
       return { id: a.id, name: a.full_name, lessonsSum, sessions: mine.length }
     }).filter((r) => r.sessions > 0).sort((a, b) => b.lessonsSum - a.lessonsSum)
