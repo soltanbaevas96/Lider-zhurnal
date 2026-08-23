@@ -4,6 +4,7 @@ import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, currentMonth, periodRange, periodLabelOf } from './lib/utils'
 import { Spinner } from './components/ui'
+import { Analytics as VercelAnalytics } from '@vercel/analytics/react'
 import Login from './pages/Login'
 import TeacherCabinet from './pages/TeacherCabinet'
 import AdminCabinet from './pages/AdminCabinet'
@@ -297,6 +298,7 @@ export default function App() {
         )}
         {dataLoading && dict && <div style={{ textAlign: 'center', color: C.faint, fontSize: 12, marginTop: 16 }}>Обновление…</div>}
       </main>
+      <VercelAnalytics />
     </div>
   )
 }
