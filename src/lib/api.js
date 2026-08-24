@@ -414,16 +414,55 @@ export async function recalcRiskFlags() {
   return data
 }
 
-// Зафиксировать контакт с родителем
-export async function saveContact(studentId, note) {
+// Зафиксировать контакт с родителем.
+// meta: { risk_reason, status } — снимок на момент контакта, чтобы в
+// ленте «Отработано» была видна причина, даже если позже пересчёт снял флаг.
+export async function saveContact(studentId, note, meta) {
   const { error } = await supabase.from('students')
     .update({ last_contact_at: new Date().toISOString(), last_contact_note: note })
     .eq('id', studentId)
   if (error) throw error
   // событие в ленту
   await supabase.from('student_events').insert({
-    student_id: studentId, event_type: 'contact', payload: { note },
+    student_id: studentId, event_type: 'contact',
+    payload: { note, risk_reason: meta?.risk_reason || null, status: meta?.status || null },
   })
+}
+
+// История контактов по риску (для вкладки «Отработано») — последние 300
+export async function fetchContactedStudents() {
+  const { data: events, error } = await supabase.from('student_events')
+    .select('id, student_id, payload, created_at')
+    .eq('event_type', 'contact')
+    .order('created_at', { ascending: false })
+    .limit(300)
+  if (error) throw error
+  if (!events?.length) return []
+
+  const ids = [...new Set(events.map((e) => e.student_id))]
+  const { data: students, error: se } = await supabase.from('students')
+    .select('id, full_name, office, lang, parent_name, parent_phone')
+    .in('id', ids)
+  if (se) throw se
+  const byId = Object.fromEntries((students || []).map((s) => [s.id, s]))
+
+  return events.map((e) => {
+    const s = byId[e.student_id]
+    if (!s) return null
+    return {
+      id: e.id,
+      student_id: e.student_id,
+      full_name: s.full_name,
+      office: s.office,
+      lang: s.lang,
+      parent_name: s.parent_name,
+      parent_phone: s.parent_phone,
+      risk_reason: e.payload?.risk_reason || null,
+      status_at_contact: e.payload?.status || null,
+      note: e.payload?.note || '',
+      contacted_at: e.created_at,
+    }
+  }).filter(Boolean)
 }
 
 // Лента событий ученика

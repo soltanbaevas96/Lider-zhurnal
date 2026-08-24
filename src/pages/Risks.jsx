@@ -1,14 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, Phone, RefreshCw, MessageCircle, X, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Download, Phone, RefreshCw, MessageCircle, X, ShieldCheck, History } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { fetchRiskStudents, recalcRiskFlags, saveContact } from '../lib/api'
+import { fetchRiskStudents, recalcRiskFlags, saveContact, fetchContactedStudents } from '../lib/api'
 import { C, fmtDate, OFFICES } from '../lib/utils'
 import DataTable from '../components/DataTable'
+
+const STATUS_LABEL = { risk: 'Риск оттока', attention: 'Внимание' }
 
 // fixedOffice: если задан (кабинет офис-менеджера) — список сразу
 // ограничен одним офисом, свои вкладки офисов не показываем.
 export default function Risks({ onOpenStudent, fixedOffice }) {
   const [rows, setRows] = useState(null)
+  const [contactRows, setContactRows] = useState(null) // история «Отработано»
+  const [section, setSection] = useState('pending') // pending | contacted
   const [busy, setBusy] = useState(false)
   const [contact, setContact] = useState(null) // ученик для фиксации контакта
   const [err, setErr] = useState('')
@@ -18,7 +22,13 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
     try { setRows(await fetchRiskStudents()) }
     catch (e) { setErr(e.message) }
   }
+  async function loadContacted() {
+    try { setContactRows(await fetchContactedStudents()) }
+    catch (e) { setErr(e.message) }
+  }
   useEffect(() => { load() }, [])
+  // историю подгружаем лениво — только когда впервые открыли вкладку
+  useEffect(() => { if (section === 'contacted' && contactRows === null) loadContacted() }, [section])
 
   async function recalc() {
     setBusy(true); setErr('')
@@ -33,6 +43,10 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
     const days = (Date.now() - new Date(s.last_contact_at)) / 86400000
     return days >= 7
   })
+
+  const contacted = fixedOffice ? (contactRows || []).filter((s) => s.office === fixedOffice) : (contactRows || [])
+
+  const sectionRows = section === 'pending' ? visible : contacted
 
   function exportRisks() {
     const data = visible.map((s, i) => ({
@@ -52,7 +66,20 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
     XLSX.writeFile(wb, `Риски_оттока_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
-  const columns = [
+  const parentCol = {
+    key: 'parent_phone', label: 'Родитель', sortable: false,
+    render: (s) => s.parent_phone ? (
+      <span>
+        <a href={`tel:${s.parent_phone}`} onClick={(e) => e.stopPropagation()}
+          style={{ color: C.ink, fontWeight: 600, textDecoration: 'none' }}>{s.parent_phone}</a>
+        {s.parent_name && <span style={{ color: C.faint, fontSize: 11.5, display: 'block' }}>{s.parent_name}</span>}
+      </span>
+    ) : '—',
+  }
+  const officeCol = { key: 'office', label: 'Офис', render: (s) => s.office || '—' }
+  const showOfficeCol = !fixedOffice && officeTab === 'all'
+
+  const pendingColumns = [
     {
       key: 'status', label: '', width: 34, sortable: true,
       render: (s) => (
@@ -66,18 +93,9 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
       render: (s) => <b style={{ color: C.brand }}>{s.full_name}</b>,
     },
     { key: 'risk_reason', label: 'Причина', render: (s) => s.risk_reason || '—' },
-    ...(!fixedOffice && officeTab === 'all' ? [{ key: 'office', label: 'Офис', render: (s) => s.office || '—' }] : []),
+    ...(showOfficeCol ? [officeCol] : []),
     { key: 'lang', label: 'Язык', width: 60, render: (s) => s.lang || '—' },
-    {
-      key: 'parent_phone', label: 'Родитель', sortable: false,
-      render: (s) => s.parent_phone ? (
-        <span>
-          <a href={`tel:${s.parent_phone}`} onClick={(e) => e.stopPropagation()}
-            style={{ color: C.ink, fontWeight: 600, textDecoration: 'none' }}>{s.parent_phone}</a>
-          {s.parent_name && <span style={{ color: C.faint, fontSize: 11.5, display: 'block' }}>{s.parent_name}</span>}
-        </span>
-      ) : '—',
-    },
+    parentCol,
     {
       key: 'last_contact_at', label: 'Контакт',
       render: (s) => s.last_contact_at
@@ -95,17 +113,44 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
     },
   ]
 
+  const contactedColumns = [
+    {
+      key: 'full_name', label: 'Ученик',
+      render: (s) => <b style={{ color: C.brand }}>{s.full_name}</b>,
+    },
+    {
+      key: 'status_at_contact', label: 'Было', width: 110,
+      render: (s) => s.status_at_contact ? (
+        <span style={{
+          fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+          color: s.status_at_contact === 'risk' ? '#dc2626' : '#d97706',
+          background: s.status_at_contact === 'risk' ? '#fee2e2' : '#fef3c7',
+        }}>{STATUS_LABEL[s.status_at_contact] || s.status_at_contact}</span>
+      ) : <span style={{ color: C.faint }}>—</span>,
+    },
+    { key: 'risk_reason', label: 'Причина пропуска', render: (s) => s.risk_reason || '—' },
+    ...(showOfficeCol ? [officeCol] : []),
+    parentCol,
+    { key: 'note', label: 'Комментарий', render: (s) => s.note || <span style={{ color: C.faint }}>—</span> },
+    {
+      key: 'contacted_at', label: 'Когда', width: 100,
+      render: (s) => <span style={{ fontSize: 12, color: C.slate }}>{fmtDate(s.contacted_at.slice(0, 10))}</span>,
+    },
+  ]
+
+  const columns = section === 'pending' ? pendingColumns : contactedColumns
+
   const riskCount = visible.filter((s) => s.status === 'risk').length
   const attnCount = visible.filter((s) => s.status === 'attention').length
 
-  // вкладки: «Все офисы» + сами офисы, с числом учеников на каждой
+  // вкладки: «Все офисы» + сами офисы, с числом учеников на каждой (для активной вкладки)
   const officeTabs = useMemo(() => {
-    const tabs = [{ k: 'all', t: 'Все офисы', n: visible.length }]
-    OFFICES.forEach((o) => tabs.push({ k: o, t: o, n: visible.filter((s) => s.office === o).length }))
+    const tabs = [{ k: 'all', t: 'Все офисы', n: sectionRows.length }]
+    OFFICES.forEach((o) => tabs.push({ k: o, t: o, n: sectionRows.filter((s) => s.office === o).length }))
     return tabs
-  }, [visible])
+  }, [sectionRows])
 
-  const tabRows = fixedOffice || officeTab === 'all' ? visible : visible.filter((s) => s.office === officeTab)
+  const tabRows = fixedOffice || officeTab === 'all' ? sectionRows : sectionRows.filter((s) => s.office === officeTab)
 
   return (
     <div>
@@ -113,14 +158,18 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
         <div style={{ flex: 1 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Риски оттока</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>
-            Ученики, которых стоит удержать. С кем связались — скрываются на 7 дней.
+            {section === 'pending'
+              ? 'Ученики, которых стоит удержать. С кем связались — скрываются на 7 дней.'
+              : 'Кто уже отработан: с кем связались и по какой причине был риск.'}
           </p>
         </div>
-        <button onClick={recalc} disabled={busy} className="rowflex"
-          style={{ gap: 6, padding: '8px 14px', background: C.grey, color: C.slate, borderRadius: 9, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
-          <RefreshCw size={15} /> {busy ? 'Считаю…' : 'Пересчитать'}
-        </button>
-        {visible.length > 0 && (
+        {section === 'pending' && (
+          <button onClick={recalc} disabled={busy} className="rowflex"
+            style={{ gap: 6, padding: '8px 14px', background: C.grey, color: C.slate, borderRadius: 9, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
+            <RefreshCw size={15} /> {busy ? 'Считаю…' : 'Пересчитать'}
+          </button>
+        )}
+        {section === 'pending' && visible.length > 0 && (
           <button onClick={exportRisks} className="rowflex"
             style={{ gap: 6, padding: '8px 14px', background: C.ok, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
             <Download size={15} /> Excel
@@ -130,11 +179,22 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
-      {/* Счётчики */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <Counter n={riskCount} label="риск оттока" color="#dc2626" bg="#fee2e2" />
-        <Counter n={attnCount} label="внимание" color="#d97706" bg="#fef3c7" />
+      {/* К отработке / Отработано */}
+      <div className="fseg" style={{ marginBottom: 14, width: 'fit-content' }}>
+        <button className={section === 'pending' ? 'on' : ''} onClick={() => setSection('pending')}>
+          <AlertTriangle size={13} style={{ verticalAlign: -2, marginRight: 4 }} />К отработке
+        </button>
+        <button className={section === 'contacted' ? 'on' : ''} onClick={() => setSection('contacted')}>
+          <History size={13} style={{ verticalAlign: -2, marginRight: 4 }} />Отработано
+        </button>
       </div>
+
+      {section === 'pending' && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <Counter n={riskCount} label="риск оттока" color="#dc2626" bg="#fee2e2" />
+          <Counter n={attnCount} label="внимание" color="#d97706" bg="#fef3c7" />
+        </div>
+      )}
 
       {/* Вкладки офисов (не нужны, если офис уже зафиксирован кабинетом офис-менеджера) */}
       {!fixedOffice && (
@@ -159,28 +219,40 @@ export default function Risks({ onOpenStudent, fixedOffice }) {
         </div>
       )}
 
-      {rows === null ? (
+      {(section === 'pending' ? rows : contactRows) === null ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка…</div>
-      ) : visible.length === 0 ? (
+      ) : sectionRows.length === 0 ? (
         <div style={{ padding: 50, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
-          <ShieldCheck size={32} color={C.ok} style={{ marginBottom: 10 }} />
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Учеников в зоне риска нет</div>
-          <div style={{ fontSize: 13, color: C.slate }}>
-            Флаги считаются по пропускам и посещаемости. Появятся, когда начнутся занятия.
-          </div>
+          {section === 'pending' ? (
+            <>
+              <ShieldCheck size={32} color={C.ok} style={{ marginBottom: 10 }} />
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Учеников в зоне риска нет</div>
+              <div style={{ fontSize: 13, color: C.slate }}>
+                Флаги считаются по пропускам и посещаемости. Появятся, когда начнутся занятия.
+              </div>
+            </>
+          ) : (
+            <>
+              <History size={32} color={C.faint} style={{ marginBottom: 10 }} />
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Пока никого не отрабатывали</div>
+              <div style={{ fontSize: 13, color: C.slate }}>
+                Здесь появится история, когда кто-то нажмёт «Связались» на вкладке «К отработке».
+              </div>
+            </>
+          )}
         </div>
       ) : tabRows.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
-          В офисе «{officeTab}» учеников в зоне риска нет.
+          В офисе «{officeTab}» {section === 'pending' ? 'учеников в зоне риска нет' : 'история пуста'}.
         </div>
       ) : (
         <DataTable columns={columns} rows={tabRows} pageSize={25}
-          onRowClick={(s) => onOpenStudent?.(s.id)} />
+          onRowClick={(s) => onOpenStudent?.(s.student_id || s.id)} />
       )}
 
       {contact && (
         <ContactModal student={contact} onClose={() => setContact(null)}
-          onSaved={async () => { setContact(null); await load() }} />
+          onSaved={async () => { setContact(null); await load(); setContactRows(null) }} />
       )}
     </div>
   )
@@ -202,7 +274,10 @@ function ContactModal({ student, onClose, onSaved }) {
 
   async function save() {
     setBusy(true); setErr('')
-    try { await saveContact(student.id, note.trim()); await onSaved() }
+    try {
+      await saveContact(student.id, note.trim(), { risk_reason: student.risk_reason, status: student.status })
+      await onSaved()
+    }
     catch (e) { setErr(e.message); setBusy(false) }
   }
 
