@@ -5,7 +5,9 @@ import { fetchRiskStudents, recalcRiskFlags, saveContact } from '../lib/api'
 import { C, fmtDate, OFFICES } from '../lib/utils'
 import DataTable from '../components/DataTable'
 
-export default function Risks({ onOpenStudent }) {
+// fixedOffice: если задан (кабинет офис-менеджера) — список сразу
+// ограничен одним офисом, свои вкладки офисов не показываем.
+export default function Risks({ onOpenStudent, fixedOffice }) {
   const [rows, setRows] = useState(null)
   const [busy, setBusy] = useState(false)
   const [contact, setContact] = useState(null) // ученик для фиксации контакта
@@ -25,8 +27,8 @@ export default function Risks({ onOpenStudent }) {
     finally { setBusy(false) }
   }
 
-  // скрываем тех, с кем связались менее 7 дней назад
-  const visible = (rows || []).filter((s) => {
+  // скрываем тех, с кем связались менее 7 дней назад (+ фильтр по офису, если задан)
+  const visible = (fixedOffice ? (rows || []).filter((s) => s.office === fixedOffice) : (rows || [])).filter((s) => {
     if (!s.last_contact_at) return true
     const days = (Date.now() - new Date(s.last_contact_at)) / 86400000
     return days >= 7
@@ -64,7 +66,7 @@ export default function Risks({ onOpenStudent }) {
       render: (s) => <b style={{ color: C.brand }}>{s.full_name}</b>,
     },
     { key: 'risk_reason', label: 'Причина', render: (s) => s.risk_reason || '—' },
-    ...(officeTab === 'all' ? [{ key: 'office', label: 'Офис', render: (s) => s.office || '—' }] : []),
+    ...(!fixedOffice && officeTab === 'all' ? [{ key: 'office', label: 'Офис', render: (s) => s.office || '—' }] : []),
     { key: 'lang', label: 'Язык', width: 60, render: (s) => s.lang || '—' },
     {
       key: 'parent_phone', label: 'Родитель', sortable: false,
@@ -103,7 +105,7 @@ export default function Risks({ onOpenStudent }) {
     return tabs
   }, [visible])
 
-  const tabRows = officeTab === 'all' ? visible : visible.filter((s) => s.office === officeTab)
+  const tabRows = fixedOffice || officeTab === 'all' ? visible : visible.filter((s) => s.office === officeTab)
 
   return (
     <div>
@@ -134,26 +136,28 @@ export default function Risks({ onOpenStudent }) {
         <Counter n={attnCount} label="внимание" color="#d97706" bg="#fef3c7" />
       </div>
 
-      {/* Вкладки офисов */}
-      <div style={{ display: 'flex', gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
-        {officeTabs.map((o) => {
-          const on = officeTab === o.k
-          return (
-            <button key={o.k} onClick={() => setOfficeTab(o.k)} className="rowflex"
-              style={{
-                gap: 6, padding: '8px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
-                border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
-                background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate,
-              }}>
-              {o.t}
-              <span style={{
-                fontSize: 11, fontWeight: 800, padding: '1px 6px', borderRadius: 20,
-                background: on ? 'rgba(255,255,255,.25)' : C.grey, color: on ? '#fff' : C.faint,
-              }}>{o.n}</span>
-            </button>
-          )
-        })}
-      </div>
+      {/* Вкладки офисов (не нужны, если офис уже зафиксирован кабинетом офис-менеджера) */}
+      {!fixedOffice && (
+        <div style={{ display: 'flex', gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
+          {officeTabs.map((o) => {
+            const on = officeTab === o.k
+            return (
+              <button key={o.k} onClick={() => setOfficeTab(o.k)} className="rowflex"
+                style={{
+                  gap: 6, padding: '8px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+                  border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                  background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate,
+                }}>
+                {o.t}
+                <span style={{
+                  fontSize: 11, fontWeight: 800, padding: '1px 6px', borderRadius: 20,
+                  background: on ? 'rgba(255,255,255,.25)' : C.grey, color: on ? '#fff' : C.faint,
+                }}>{o.n}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {rows === null ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка…</div>

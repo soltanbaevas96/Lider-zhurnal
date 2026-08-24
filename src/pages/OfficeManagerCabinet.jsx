@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Search, Users, Building2, Wallet, Layers, X, Check, Trash2, Calendar } from 'lucide-react'
+import { Plus, Search, Users, Building2, Wallet, Layers, X, Check, Trash2, Calendar, AlertTriangle } from 'lucide-react'
 import {
   fetchStudentsWithGroups, fetchAllGroups, createGroup, updateGroup,
   fetchStudentsPayments, fetchStudentPayments, addPayment, deletePayment,
@@ -7,6 +7,7 @@ import {
 import { C, initials, avColorByIndex, OFFICES, fmtDate } from '../lib/utils'
 import DataTable from '../components/DataTable'
 import { StudentModal } from './Manage'
+import Risks from './Risks'
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
 
@@ -46,6 +47,7 @@ export default function OfficeManagerCabinet({ managerOffice, isSenior, onOpenSt
             { k: 'students', t: 'Ученики', icon: Users },
             { k: 'groups', t: 'Группы', icon: Layers },
             { k: 'payments', t: 'Оплаты', icon: Wallet },
+            { k: 'risks', t: 'Риски', icon: AlertTriangle },
           ].map((o) => {
             const on = tab === o.k
             const Icon = o.icon
@@ -64,6 +66,7 @@ export default function OfficeManagerCabinet({ managerOffice, isSenior, onOpenSt
       {tab === 'students' && <StudentsTab office={activeOffice} onOpenStudent={onOpenStudent} />}
       {tab === 'groups' && <GroupsTab office={activeOffice} />}
       {tab === 'payments' && <PaymentsTab office={activeOffice} onOpenStudent={onOpenStudent} />}
+      {tab === 'risks' && <Risks fixedOffice={activeOffice} onOpenStudent={onOpenStudent} />}
     </div>
   )
 }
