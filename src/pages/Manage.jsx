@@ -576,11 +576,13 @@ function StudentsManage({ groups, onOpenStudent }) {
   }
   useEffect(() => { reload() }, [])
 
+  // пока идёт поиск — ищем по всем офисам/языкам сразу, не только по открытой вкладке
+  const searching = q.trim().length > 0
   const filtered = (students || []).filter((s) => {
     // офис/язык берём из колонок напрямую; если пусто — из contact (старые данные)
     const sOffice = s.office || officeOf(s.contact)
     const sLang = s.lang || langOf(s.contact)
-    if (sOffice !== office || sLang !== lang) return false
+    if (!searching && (sOffice !== office || sLang !== lang)) return false
     const t = q.toLowerCase().trim()
     return !t || s.full_name.toLowerCase().includes(t)
   })
@@ -614,6 +616,14 @@ function StudentsManage({ groups, onOpenStudent }) {
         </div>
       ),
     },
+    ...(searching ? [{
+      key: 'office', label: 'Офис', width: 110,
+      render: (s) => {
+        const sOffice = s.office || officeOf(s.contact)
+        const sLang = s.lang || langOf(s.contact)
+        return <span style={{ color: C.slate }}>{sOffice || '—'}{sLang ? ` · ${sLang}` : ''}</span>
+      },
+    }] : []),
     {
       key: 'groups', label: 'Группы', sortable: false,
       sortValue: (s) => s.groupIds.length,
@@ -644,7 +654,9 @@ function StudentsManage({ groups, onOpenStudent }) {
 
   return (
     <>
-      <OfficeLangTabs office={office} lang={lang} setOffice={setOffice} setLang={setLang} count={filtered.length} />
+      <div style={{ opacity: searching ? 0.4 : 1, pointerEvents: searching ? 'none' : 'auto' }}>
+        <OfficeLangTabs office={office} lang={lang} setOffice={setOffice} setLang={setLang} count={filtered.length} />
+      </div>
       <div className="fbar">
         <div className="search-box">
           <Search size={15} color={C.slate} style={{ position: 'absolute', left: 11, top: 9 }} />
