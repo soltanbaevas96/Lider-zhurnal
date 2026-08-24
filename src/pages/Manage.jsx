@@ -9,7 +9,7 @@ import { GroupMultiSelect } from '../components/GroupSearchSelect'
 import {
   addTeacher, addAssistant, addCurator, addGroup, addSubject, updateRow, archiveRow, restoreRow, inviteTeacher,
   fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
-  addStudentToGroup, removeStudentFromGroup, fetchAllStudents, deleteStudent,
+  addStudentToGroup, removeStudentFromGroup, fetchAllStudents, deleteStudent, findStudentsByName,
   getAccountInfo, adminSetPassword, adminSetRole, adminSoftDelete, adminCreateAccount,
   fetchProfilesByRole, adminUpdateProfileName,
 } from '../lib/api'
@@ -962,7 +962,19 @@ export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [confirmDel, setConfirmDel] = useState(false)
+  const [dupWarning, setDupWarning] = useState([])
   const valid = name.trim()
+
+  // Предупреждаем, если активный ученик с таким же именем уже есть —
+  // не блокируем (бывают тёзки), но даём заметить возможный дубль.
+  useEffect(() => {
+    const n = name.trim()
+    if (n.length < 3) { setDupWarning([]); return }
+    const t = setTimeout(() => {
+      findStudentsByName(n, row?.id).then(setDupWarning).catch(() => {})
+    }, 400)
+    return () => clearTimeout(t)
+  }, [name, row?.id])
 
   async function save() {
     setBusy(true); setErr('')
@@ -1002,6 +1014,14 @@ export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
         </div>
 
         <Field label="ФИО ученика"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Фамилия Имя" style={inp} autoFocus /></Field>
+
+        {dupWarning.length > 0 && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>
+            Уже есть {dupWarning.length === 1 ? 'ученик с таким именем' : `${dupWarning.length} ученика с таким именем`}: {dupWarning.map((d, i) => (
+              <b key={d.id}>{i > 0 && '; '}{d.office || '—'}{d.contract_no ? `, договор ${d.contract_no}` : ''}</b>
+            ))}. Проверьте — возможно, это уже заведённый ученик, а не новый.
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}>

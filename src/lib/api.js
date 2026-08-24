@@ -287,19 +287,36 @@ export async function addStudent(fields, groupIds) {
   const { data, error } = await supabase.from('students')
     .insert({ ...fields, full_name: fields.full_name, contact: fields.contact || null }).select().single()
   if (error) throw error
-  if (groupIds?.length) {
+  const ids = [...new Set(groupIds || [])]
+  if (ids.length) {
     await supabase.from('student_groups')
-      .insert(groupIds.map((group_id) => ({ student_id: data.id, group_id })))
+      .insert(ids.map((group_id) => ({ student_id: data.id, group_id })))
   }
   return data
+}
+
+// Активные ученики с точно таким же именем (регистр не важен) — для
+// предупреждения о возможном дубле при создании новой карточки.
+export async function findStudentsByName(fullName, excludeId) {
+  const name = fullName.trim()
+  if (!name) return []
+  let q = supabase.from('students')
+    .select('id, office, lang, contract_no')
+    .eq('archived', false)
+    .ilike('full_name', name)
+  if (excludeId) q = q.neq('id', excludeId)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 
 export async function updateStudent(id, fields, groupIds) {
   await supabase.from('students').update({ ...fields, contact: fields.contact || null }).eq('id', id)
   await supabase.from('student_groups').delete().eq('student_id', id)
-  if (groupIds?.length) {
+  const ids = [...new Set(groupIds || [])]
+  if (ids.length) {
     await supabase.from('student_groups')
-      .insert(groupIds.map((group_id) => ({ student_id: id, group_id })))
+      .insert(ids.map((group_id) => ({ student_id: id, group_id })))
   }
 }
 
