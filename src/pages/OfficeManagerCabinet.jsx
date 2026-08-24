@@ -63,20 +63,23 @@ export default function OfficeManagerCabinet({ managerOffice, isSenior, onOpenSt
         </div>
       </div>
 
-      {tab === 'students' && <StudentsTab office={activeOffice} onOpenStudent={onOpenStudent} />}
-      {tab === 'groups' && <GroupsTab office={activeOffice} />}
+      {tab === 'students' && <StudentsTab homeOffice={managerOffice} onOpenStudent={onOpenStudent} />}
+      {tab === 'groups' && <GroupsTab homeOffice={managerOffice} />}
       {tab === 'payments' && <PaymentsTab office={activeOffice} onOpenStudent={onOpenStudent} />}
       {tab === 'risks' && <Risks fixedOffice={activeOffice} onOpenStudent={onOpenStudent} />}
     </div>
   )
 }
 
-function StudentsTab({ office, onOpenStudent }) {
+function StudentsTab({ homeOffice, onOpenStudent }) {
   const [students, setStudents] = useState(null)
   const [groups, setGroups] = useState([])
   const [modal, setModal] = useState(null)
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
+  // по умолчанию свой офис, но ученик мог перейти/ходить в другой —
+  // поэтому доступен переключатель на все офисы
+  const [officeFilter, setOfficeFilter] = useState(homeOffice || 'all')
 
   async function reload() {
     try {
@@ -87,7 +90,7 @@ function StudentsTab({ office, onOpenStudent }) {
   useEffect(() => { reload() }, [])
 
   const filtered = (students || []).filter((s) => {
-    if (s.office !== office) return false
+    if (officeFilter !== 'all' && s.office !== officeFilter) return false
     const t = q.toLowerCase().trim()
     if (!t) return true
     return (s.full_name || '').toLowerCase().includes(t)
@@ -103,6 +106,7 @@ function StudentsTab({ office, onOpenStudent }) {
           style={{ fontWeight: 600, color: C.brand, cursor: 'pointer' }}>{s.full_name}</span>
       </div>
     )},
+    ...(officeFilter === 'all' ? [{ key: 'office', label: 'Офис', width: 110, render: (s) => s.office || '—' }] : []),
     { key: 'grade', label: 'Класс', width: 70, render: (s) => s.grade || '—' },
     { key: 'groups', label: 'Группы', render: (s) => s.groupsData?.length ? s.groupsData.map((g) => g.name).join(', ') : <span style={{ color: C.faint }}>без группы</span> },
     { key: 'phone', label: 'Телефон', width: 130, render: (s) => s.phone || '—' },
@@ -115,6 +119,7 @@ function StudentsTab({ office, onOpenStudent }) {
 
   return (
     <div>
+      <OfficeFilterChips value={officeFilter} onChange={setOfficeFilter} />
       <div className="rowflex" style={{ gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
           <Search size={17} color={C.faint} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
@@ -135,18 +140,20 @@ function StudentsTab({ office, onOpenStudent }) {
       )}
       {modal && (
         <StudentModal groups={groups} row={modal === 'new' ? null : modal.row}
-          fixedOffice={office} onClose={() => setModal(null)}
+          fixedOffice={officeFilter !== 'all' ? officeFilter : (homeOffice || 'Маргулана')}
+          onClose={() => setModal(null)}
           onDone={() => { setModal(null); reload() }} />
       )}
     </div>
   )
 }
 
-function GroupsTab({ office }) {
+function GroupsTab({ homeOffice }) {
   const [groups, setGroups] = useState(null)
   const [modal, setModal] = useState(null)
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
+  const [officeFilter, setOfficeFilter] = useState(homeOffice || 'all')
 
   async function reload() {
     try { setGroups(await fetchAllGroups()) } catch (e) { setErr(e.message) }
@@ -154,13 +161,14 @@ function GroupsTab({ office }) {
   useEffect(() => { reload() }, [])
 
   const filtered = (groups || []).filter((g) => {
-    if (g.office !== office) return false
+    if (officeFilter !== 'all' && g.office !== officeFilter) return false
     const t = q.toLowerCase().trim()
     return !t || (g.name || '').toLowerCase().includes(t) || (g.subject_name || '').toLowerCase().includes(t)
   })
 
   const columns = [
     { key: 'name', label: 'Группа', render: (g) => <b>{g.name}</b> },
+    ...(officeFilter === 'all' ? [{ key: 'office', label: 'Офис', width: 110, render: (g) => g.office || '—' }] : []),
     { key: 'subject_name', label: 'Предмет', render: (g) => (g.subject_name || '—').split(' / ')[0] },
     { key: 'lang', label: 'Язык', width: 80, render: (g) => g.lang || '—' },
     { key: 'capacity', label: 'Вместимость', width: 110, num: true, render: (g) => g.capacity || 12 },
@@ -172,6 +180,7 @@ function GroupsTab({ office }) {
 
   return (
     <div>
+      <OfficeFilterChips value={officeFilter} onChange={setOfficeFilter} />
       <div className="rowflex" style={{ gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
           <Search size={17} color={C.faint} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
@@ -191,9 +200,28 @@ function GroupsTab({ office }) {
         <DataTable columns={columns} rows={filtered} pageSize={40} />
       )}
       {modal && (
-        <GroupModal row={modal === 'new' ? null : modal.row} office={office}
+        <GroupModal row={modal === 'new' ? null : modal.row}
+          office={modal === 'new' ? (officeFilter !== 'all' ? officeFilter : (homeOffice || 'Маргулана')) : modal.row.office}
           onClose={() => setModal(null)} onDone={() => { setModal(null); reload() }} />
       )}
+    </div>
+  )
+}
+
+function OfficeFilterChips({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
+      {['all', ...OFFICES].map((o) => {
+        const on = value === o
+        return (
+          <button key={o} onClick={() => onChange(o)} className="rowflex"
+            style={{ gap: 6, padding: '7px 14px', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+              background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate }}>
+            <Building2 size={14} /> {o === 'all' ? 'Все офисы' : o}
+          </button>
+        )
+      })}
     </div>
   )
 }
