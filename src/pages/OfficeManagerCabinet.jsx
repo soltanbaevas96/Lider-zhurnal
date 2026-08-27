@@ -292,18 +292,18 @@ export function PaymentsTab({ office, onOpenStudent }) {
 
   const columns = [
     { key: 'full_name', label: 'Ученик', render: (s) => (
-      <span onClick={() => onOpenStudent?.(s.id)} style={{ fontWeight: 600, color: C.brand, cursor: 'pointer' }}>{s.full_name}</span>
+      <span style={{ fontWeight: 600, color: C.brand }}>{s.full_name}</span>
     )},
     { key: 'grade', label: 'Класс', width: 70, render: (s) => s.grade || '—' },
     { key: 'parent_name', label: 'Родитель', render: (s) => s.parent_name || '—' },
     { key: 'total_paid', label: 'Всего оплачено', num: true, width: 150,
       sortValue: (s) => Number(s.total_paid || 0),
       render: (s) => <b style={{ color: Number(s.total_paid) > 0 ? C.ok : C.faint }}>{money(s.total_paid)} ₸</b> },
-    { key: 'last_paid', label: 'Последняя', width: 120, render: (s) => s.last_paid ? fmtDate(s.last_paid) : <span style={{ color: C.faint }}>—</span> },
-    { key: 'add', label: '', width: 130, sortable: false, render: (s) => (
+    { key: 'last_paid', label: 'Последняя оплата', width: 140, render: (s) => s.last_paid ? fmtDate(s.last_paid) : <span style={{ color: C.faint }}>ещё не платил</span> },
+    { key: 'add', label: '', width: 160, sortable: false, render: (s) => (
       <button onClick={(e) => { e.stopPropagation(); setPayFor(s) }} className="rowflex"
         style={{ gap: 5, padding: '6px 12px', background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
-        <Plus size={13} /> Оплата
+        <Plus size={13} /> История и оплата
       </button>
     )},
   ]
@@ -322,11 +322,13 @@ export function PaymentsTab({ office, onOpenStudent }) {
         </div>
       </div>
       {err && <ErrBox>{err}</ErrBox>}
-      <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>Учеников: <b>{filtered.length}</b></div>
+      <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>
+        Учеников: <b>{filtered.length}</b> · нажмите на ученика, чтобы увидеть историю оплат
+      </div>
       {rows === null ? <Loading /> : filtered.length === 0 ? (
         <Empty icon={Wallet} text="Учеников не найдено" />
       ) : (
-        <DataTable columns={columns} rows={filtered} pageSize={30} />
+        <DataTable columns={columns} rows={filtered} pageSize={30} onRowClick={(s) => setPayFor(s)} />
       )}
       {payFor && (
         <PaymentModal student={payFor} onClose={() => setPayFor(null)}
@@ -363,13 +365,15 @@ function PaymentModal({ student, onClose, onDone }) {
     try { await deletePayment(id); await loadHistory() } catch (e) { setErr(e.message) }
   }
 
-  const total = (history || []).reduce((n, p) => n + Number(p.amount || 0), 0)
+  const sortedHistory = [...(history || [])].sort((a, b) => (b.paid_at || '').localeCompare(a.paid_at || ''))
+  const total = sortedHistory.reduce((n, p) => n + Number(p.amount || 0), 0)
 
   return (
-    <Modal title="Оплаты ученика" onClose={onClose} wide onDoneClose={onDone}>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>{student.full_name}</div>
+    <Modal title="История и оплата" onClose={onClose} wide onDoneClose={onDone}>
+      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>{student.full_name}</div>
       <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 14 }}>
         Всего оплачено: <b style={{ color: C.ok }}>{money(total)} ₸</b>
+        {sortedHistory.length > 0 && <> · {sortedHistory.length} {sortedHistory.length === 1 ? 'платёж' : 'платежей'}</>}
       </div>
 
       <div style={{ background: C.grey, borderRadius: 12, padding: 14, marginBottom: 14 }}>
@@ -402,10 +406,13 @@ function PaymentModal({ student, onClose, onDone }) {
 
       <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>История оплат</div>
       {history === null ? <div style={{ color: C.slate, fontSize: 13 }}>Загрузка…</div>
-        : history.length === 0 ? <div style={{ color: C.faint, fontSize: 13 }}>Оплат пока нет</div>
-        : (
+        : sortedHistory.length === 0 ? (
+          <div style={{ padding: '16px 12px', textAlign: 'center', color: C.faint, fontSize: 13, background: C.grey, borderRadius: 10 }}>
+            Ещё ни одной оплаты не записано — добавьте первую выше.
+          </div>
+        ) : (
           <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: 'hidden', maxHeight: 240, overflowY: 'auto' }}>
-            {history.map((p, i) => (
+            {sortedHistory.map((p, i) => (
               <div key={p.id} className="rowflex" style={{ gap: 10, padding: '10px 12px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
                 <Calendar size={14} color={C.faint} />
                 <span style={{ fontSize: 13 }}>{fmtDate(p.paid_at)}</span>
