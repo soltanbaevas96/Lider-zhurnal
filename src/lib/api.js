@@ -685,14 +685,15 @@ export async function fetchMissedLessons(days = 14) {
 }
 
 // ---------- ПРОВЕРКА ПЛАНОВ УРОКОВ (для завуча) ----------
-// Все занятия с прикреплённым планом за период + реальный размер файла
-// из Storage — таблица lessons размер не хранит, только путь к файлу.
-// Маленький/отсутствующий файл — явный признак «для галочки».
-export async function fetchLessonPlansReport(period) {
+// Все ПРОВЕДЁННЫЕ занятия за период (с планом и без) — для разбора
+// преподаватель/куратор → группа → занятия. У занятий с планом ещё и
+// реальный размер файла из Storage (таблица lessons размер не хранит,
+// только путь) — маленький/отсутствующий файл виден без открытия.
+export async function fetchLessonPlansOverview(period) {
   const lessons = await fetchAllPages(() => {
     let lq = supabase.from('lessons')
-      .select('id, group_id, teacher_id, lesson_date, status, topic, plan_path')
-      .not('plan_path', 'is', null)
+      .select('id, group_id, teacher_id, curator_id, lesson_date, status, topic, plan_path')
+      .eq('status', 'проведён')
       .order('lesson_date', { ascending: false }).order('id')
     if (period?.from) lq = lq.gte('lesson_date', period.from)
     if (period?.to) lq = lq.lte('lesson_date', period.to)
@@ -700,25 +701,28 @@ export async function fetchLessonPlansReport(period) {
   })
   if (!lessons.length) return []
 
-  // Метаданные файлов бакета (постранично — их может быть тысячи)
+  // Метаданные файлов бакета — только если хоть у кого-то есть план
+  // (их может быть тысячи, читаем постранично)
   const files = {}
   let filesOk = true
-  let offset = 0
-  for (;;) {
-    const { data, error } = await supabase.storage.from('lesson-plans')
-      .list('', { limit: 1000, offset, sortBy: { column: 'name', order: 'asc' } })
-    if (error) { filesOk = false; break }
-    ;(data || []).forEach((f) => { files[f.name] = f })
-    if (!data || data.length < 1000) break
-    offset += 1000
+  if (lessons.some((l) => l.plan_path)) {
+    let offset = 0
+    for (;;) {
+      const { data, error } = await supabase.storage.from('lesson-plans')
+        .list('', { limit: 1000, offset, sortBy: { column: 'name', order: 'asc' } })
+      if (error) { filesOk = false; break }
+      ;(data || []).forEach((f) => { files[f.name] = f })
+      if (!data || data.length < 1000) break
+      offset += 1000
+    }
   }
 
   return lessons.map((l) => {
-    const f = files[l.plan_path]
+    const f = l.plan_path ? files[l.plan_path] : null
     return {
       ...l,
       file_size: f?.metadata?.size ?? null,
-      file_missing: filesOk && !f,
+      file_missing: !!l.plan_path && filesOk && !f,
       file_info_available: filesOk,
     }
   })
