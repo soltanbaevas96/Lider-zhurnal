@@ -684,6 +684,46 @@ export async function fetchMissedLessons(days = 14) {
   return data || []
 }
 
+// ---------- ПРОВЕРКА ПЛАНОВ УРОКОВ (для завуча) ----------
+// Все занятия с прикреплённым планом за период + реальный размер файла
+// из Storage — таблица lessons размер не хранит, только путь к файлу.
+// Маленький/отсутствующий файл — явный признак «для галочки».
+export async function fetchLessonPlansReport(period) {
+  const lessons = await fetchAllPages(() => {
+    let lq = supabase.from('lessons')
+      .select('id, group_id, teacher_id, lesson_date, status, topic, plan_path')
+      .not('plan_path', 'is', null)
+      .order('lesson_date', { ascending: false }).order('id')
+    if (period?.from) lq = lq.gte('lesson_date', period.from)
+    if (period?.to) lq = lq.lte('lesson_date', period.to)
+    return lq
+  })
+  if (!lessons.length) return []
+
+  // Метаданные файлов бакета (постранично — их может быть тысячи)
+  const files = {}
+  let filesOk = true
+  let offset = 0
+  for (;;) {
+    const { data, error } = await supabase.storage.from('lesson-plans')
+      .list('', { limit: 1000, offset, sortBy: { column: 'name', order: 'asc' } })
+    if (error) { filesOk = false; break }
+    ;(data || []).forEach((f) => { files[f.name] = f })
+    if (!data || data.length < 1000) break
+    offset += 1000
+  }
+
+  return lessons.map((l) => {
+    const f = files[l.plan_path]
+    return {
+      ...l,
+      file_size: f?.metadata?.size ?? null,
+      file_missing: filesOk && !f,
+      file_info_available: filesOk,
+    }
+  })
+}
+
 // Провести занятие: тема + посещаемость + статус (+ баллы за тест, если был)
 export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance, has_test, test_max_score }) {
   const { error: le } = await supabase.from('lessons').update({

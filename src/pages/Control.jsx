@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
-  Bell, History, CalendarX, AlertTriangle, Cake, FileWarning, RefreshCw, User,
+  Bell, History, CalendarX, AlertTriangle, Cake, FileWarning, RefreshCw, User, FileText, ExternalLink,
 } from 'lucide-react'
-import { fetchNotifications, fetchAuditLog, fetchMissedLessons } from '../lib/api'
-import { C, fmtDate } from '../lib/utils'
+import { fetchNotifications, fetchAuditLog, fetchMissedLessons, fetchLessonPlansReport, planUrl } from '../lib/api'
+import { C, fmtDate, nameOf, periodRange, currentMonth } from '../lib/utils'
 import DataTable from '../components/DataTable'
+import PeriodPicker from '../components/PeriodPicker'
 
 const SEV = {
   danger: { color: '#dc2626', bg: '#fee2e2', icon: AlertTriangle },
@@ -18,8 +19,8 @@ const TABLES = {
   teachers: 'преподавателя', curators: 'куратора',
 }
 
-export default function Control({ onOpenStudent }) {
-  const [tab, setTab] = useState('alerts')  // alerts | missed | log
+export default function Control({ dict, onOpenStudent }) {
+  const [tab, setTab] = useState('alerts')  // alerts | missed | log | plans
   const [alerts, setAlerts] = useState(null)
   const [missed, setMissed] = useState([])
   const [log, setLog] = useState([])
@@ -43,6 +44,7 @@ export default function Control({ onOpenStudent }) {
   const tabs = [
     { k: 'alerts', t: 'Уведомления', n: alerts?.length || 0, icon: Bell },
     { k: 'missed', t: 'Не проведено', n: missed.length, icon: CalendarX },
+    { k: 'plans', t: 'Планы уроков', n: null, icon: FileText },
     { k: 'log', t: 'Журнал изменений', n: null, icon: History },
   ]
 
@@ -55,10 +57,12 @@ export default function Control({ onOpenStudent }) {
             Что требует внимания и кто что менял в системе
           </p>
         </div>
-        <button onClick={load} disabled={loading} className="rowflex"
-          style={{ gap: 6, padding: '8px 14px', background: C.grey, color: C.slate, borderRadius: 9, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
-          <RefreshCw size={15} /> Обновить
-        </button>
+        {tab !== 'plans' && (
+          <button onClick={load} disabled={loading} className="rowflex"
+            style={{ gap: 6, padding: '8px 14px', background: C.grey, color: C.slate, borderRadius: 9, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
+            <RefreshCw size={15} /> Обновить
+          </button>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -86,7 +90,9 @@ export default function Control({ onOpenStudent }) {
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
-      {loading ? (
+      {tab === 'plans' ? (
+        <PlansCheck dict={dict} />
+      ) : loading ? (
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
       ) : tab === 'alerts' ? (
         <Alerts rows={alerts} onOpenStudent={onOpenStudent} />
@@ -95,6 +101,115 @@ export default function Control({ onOpenStudent }) {
       ) : (
         <AuditLog rows={log} />
       )}
+    </div>
+  )
+}
+
+// ---------- ПЛАНЫ УРОКОВ ----------
+// Проверка приложенных файлов планов: размер виден без открытия —
+// подозрительно маленький или отсутствующий файл сразу заметен.
+const SMALL_PLAN_BYTES = 3000 // меньше 3 КБ — почти наверняка «для галочки»
+
+function PlansCheck({ dict }) {
+  const [period, setPeriod] = useState({ mode: 'month', month: currentMonth() })
+  const [rows, setRows] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  const range = useMemo(() => periodRange(period), [period])
+
+  async function load() {
+    setLoading(true); setErr('')
+    try { setRows(await fetchLessonPlansReport(range)) }
+    catch (e) { setErr(e.message) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [range])
+
+  const openPlan = async (path) => {
+    const url = await planUrl(path)
+    if (url) window.open(url, '_blank')
+    else setErr('Не удалось открыть файл — возможно, он был удалён из хранилища')
+  }
+
+  const smallCount = (rows || []).filter((r) => r.file_size != null && r.file_size < SMALL_PLAN_BYTES).length
+  const missingCount = (rows || []).filter((r) => r.file_missing).length
+  const sizesUnavailable = rows?.length > 0 && rows[0].file_info_available === false
+
+  const columns = [
+    { key: 'lesson_date', label: 'Дата', width: 100, render: (r) => fmtDate(r.lesson_date) },
+    { key: 'teacher', label: 'Преподаватель', sortValue: (r) => nameOf(dict.teachers, r.teacher_id) || '', render: (r) => nameOf(dict.teachers, r.teacher_id) || '—' },
+    { key: 'group', label: 'Группа', sortValue: (r) => nameOf(dict.groups, r.group_id) || '', render: (r) => nameOf(dict.groups, r.group_id) || '—' },
+    { key: 'topic', label: 'Тема', render: (r) => r.topic || <span style={{ color: C.faint }}>—</span> },
+    {
+      key: 'file_size', label: 'Размер файла', width: 150,
+      sortValue: (r) => r.file_missing ? -2 : (r.file_size ?? -1),
+      render: (r) => r.file_missing
+        ? <span style={{ color: '#dc2626', fontWeight: 700, fontSize: 12 }}>файл не найден</span>
+        : r.file_size == null
+          ? <span style={{ color: C.faint }}>—</span>
+          : (
+            <span style={{ fontWeight: 700, fontSize: 12.5, color: r.file_size < SMALL_PLAN_BYTES ? '#d97706' : C.slate }}>
+              {fmtBytes(r.file_size)}{r.file_size < SMALL_PLAN_BYTES && ' ⚠'}
+            </span>
+          ),
+    },
+    {
+      key: 'open', label: '', width: 110, sortable: false, render: (r) => (
+        <button onClick={(e) => { e.stopPropagation(); openPlan(r.plan_path) }} className="rowflex"
+          style={{ gap: 5, padding: '5px 10px', background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          <ExternalLink size={13} /> Открыть
+        </button>
+      ),
+    },
+  ]
+
+  return (
+    <div>
+      <div className="rowflex" style={{ gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+        <p style={{ margin: 0, fontSize: 13, color: C.slate, flex: 1 }}>
+          Все занятия с прикреплённым планом за период — размер файла виден сразу, без открытия каждого.
+        </p>
+        <PeriodPicker period={period} setPeriod={setPeriod} />
+      </div>
+
+      {(smallCount > 0 || missingCount > 0) && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          {smallCount > 0 && <Counter n={smallCount} label="подозрительно маленьких (< 3 КБ)" color="#d97706" bg="#fef3c7" />}
+          {missingCount > 0 && <Counter n={missingCount} label="файл не найден в хранилище" color="#dc2626" bg="#fee2e2" />}
+        </div>
+      )}
+
+      {sizesUnavailable && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontSize: 12.5 }}>
+          Не удалось получить размер файлов из хранилища. Открыть и проверить вручную по-прежнему можно.
+        </div>
+      )}
+
+      {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
+
+      {loading ? (
+        <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+      ) : !rows?.length ? (
+        <Empty icon={FileText} title="Планов нет" text="За этот период ещё никто не прикреплял план урока." />
+      ) : (
+        <DataTable columns={columns} rows={rows} pageSize={30} initialSort={{ key: 'file_size', dir: 'asc' }} />
+      )}
+    </div>
+  )
+}
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} Б`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`
+  return `${(n / (1024 * 1024)).toFixed(1)} МБ`
+}
+
+function Counter({ n, label, color, bg }) {
+  return (
+    <div className="rowflex" style={{ gap: 8, background: bg, borderRadius: 10, padding: '9px 14px' }}>
+      <span style={{ fontSize: 20, fontWeight: 800, color }}>{n}</span>
+      <span style={{ fontSize: 12.5, color, fontWeight: 600 }}>{label}</span>
     </div>
   )
 }

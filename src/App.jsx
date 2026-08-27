@@ -222,7 +222,7 @@ export default function App() {
         ) : isManager && view === 'schedule' ? (
           <Schedule dict={dict} isAdmin={isAdmin} />
         ) : isManager && view === 'control' ? (
-          <Control onOpenStudent={(id) => setOpenStudent(id)} />
+          <Control dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : canSeeFinance && view === 'payroll' ? (
           <Payroll isAdmin={isAdmin} canEditRate={isAdmin || isAccountant} />
         ) : canSeeFinance && view === 'payments' ? (
