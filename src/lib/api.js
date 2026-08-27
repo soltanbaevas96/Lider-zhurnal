@@ -17,6 +17,19 @@ async function fetchAllPages(queryFactory, pageSize = 1000) {
   }
 }
 
+// Когда список id для .in(...) сам по себе большой (тысячи уроков за
+// месяц) — URL запроса может стать слишком длинным. Бьём id на пачки,
+// а внутри каждой пачки всё равно читаем постранично (см. выше).
+async function fetchByIdChunks(ids, queryFactory, chunkSize = 200) {
+  let all = []
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize)
+    const rows = await fetchAllPages(() => queryFactory(chunk))
+    all = all.concat(rows)
+  }
+  return all
+}
+
 // ---------- СПРАВОЧНИКИ ----------
 export async function fetchDictionaries() {
   const [subjects, groupsRows, teachers, assistants, curators, tSubjects, studentsRows] = await Promise.all([
@@ -280,10 +293,10 @@ export async function fetchAttendanceReport(period) {
   const lessonIds = lessons.map((l) => l.id)
   if (!lessonIds.length) return { rows: [], lessonsById: {} }
 
-  const att = await fetchAllPages(() => supabase
+  const att = await fetchByIdChunks(lessonIds, (chunk) => supabase
     .from('attendance')
     .select('lesson_id, student_id, present')
-    .in('lesson_id', lessonIds)
+    .in('lesson_id', chunk)
     .order('lesson_id').order('student_id'))
 
   const lessonsById = {}
@@ -382,12 +395,9 @@ export async function fetchTimesheetData(period) {
   })
 
   const lessonIds = lessons.map((l) => l.id)
-  let attendance = []
-  if (lessonIds.length) {
-    attendance = await fetchAllPages(() => supabase
-      .from('attendance').select('lesson_id, student_id, present, absence_reason')
-      .in('lesson_id', lessonIds).order('lesson_id').order('student_id'))
-  }
+  const attendance = await fetchByIdChunks(lessonIds, (chunk) => supabase
+    .from('attendance').select('lesson_id, student_id, present, absence_reason')
+    .in('lesson_id', chunk).order('lesson_id').order('student_id'))
 
   // Связки ученик-группа (чтобы знать состав групп)
   const links = await fetchAllPages(() => supabase.from('student_groups').select('student_id, group_id').order('student_id').order('group_id'))
@@ -522,12 +532,9 @@ export async function fetchDashboardData(period) {
   })
 
   const ids = lessons.map((l) => l.id)
-  let attendance = []
-  if (ids.length) {
-    attendance = await fetchAllPages(() => supabase
-      .from('attendance').select('lesson_id, student_id, present, absence_reason')
-      .in('lesson_id', ids).order('lesson_id').order('student_id'))
-  }
+  const attendance = await fetchByIdChunks(ids, (chunk) => supabase
+    .from('attendance').select('lesson_id, student_id, present, absence_reason')
+    .in('lesson_id', chunk).order('lesson_id').order('student_id'))
 
   const [groups, students, links] = await Promise.all([
     fetchAllPages(() => supabase.from('groups').select('id, name, office, lang, subject_name, capacity').eq('archived', false).order('id')),
