@@ -10,15 +10,16 @@ export default function Timesheets({ dict, onOpenStudent }) {
   const [period, setPeriod] = useState({ mode: 'month', month: new Date().toISOString().slice(0, 7) })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
 
   const range = useMemo(() => periodRange(period), [period])
   const label = periodLabelOf(period)
 
   useEffect(() => {
-    setLoading(true)
+    setLoading(true); setErr('')
     fetchTimesheetData(range)
       .then(setData)
-      .catch(() => setData(null))
+      .catch((e) => { setData(null); setErr(e.message || 'Не удалось загрузить табель') })
       .finally(() => setLoading(false))
   }, [range])
 
@@ -183,6 +184,12 @@ export default function Timesheets({ dict, onOpenStudent }) {
           )
         })}
       </div>
+
+      {err && (
+        <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>
+          Не удалось загрузить табель: {err}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
