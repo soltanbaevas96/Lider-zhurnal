@@ -1,17 +1,34 @@
 import { supabase } from './supabase'
 
+// Supabase может резать выдачу одного запроса (Project Settings → API →
+// Max rows) — клиентский .limit() выше этого потолка не всегда помогает.
+// Для потенциально больших таблиц (ученики, группы, уроки, посещаемость)
+// читаем постранично, пока не придёт неполная страница — так число строк
+// не упирается ни в какой скрытый потолок.
+async function fetchAllPages(queryFactory, pageSize = 1000) {
+  let all = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await queryFactory().range(from, from + pageSize - 1)
+    if (error) throw error
+    all = all.concat(data || [])
+    if (!data || data.length < pageSize) return all
+    from += pageSize
+  }
+}
+
 // ---------- СПРАВОЧНИКИ ----------
 export async function fetchDictionaries() {
-  const [subjects, groups, teachers, assistants, curators, tSubjects, students] = await Promise.all([
+  const [subjects, groupsRows, teachers, assistants, curators, tSubjects, studentsRows] = await Promise.all([
     supabase.from('subjects').select('*').order('name'),
-    supabase.from('groups').select('*').eq('archived', false).order('name'),
+    fetchAllPages(() => supabase.from('groups').select('*').eq('archived', false).order('name').order('id')),
     supabase.from('teachers').select('*').eq('archived', false).order('full_name'),
     supabase.from('assistants').select('*').eq('archived', false).order('full_name'),
     supabase.from('curators').select('*').eq('archived', false).order('full_name'),
     supabase.from('teacher_subjects').select('teacher_id, subject_id'),
-    supabase.from('students').select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').limit(100000),
+    fetchAllPages(() => supabase.from('students').select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').order('id')),
   ])
-  const err = subjects.error || groups.error || teachers.error || assistants.error || curators.error || tSubjects.error || students.error
+  const err = subjects.error || teachers.error || assistants.error || curators.error || tSubjects.error
   if (err) throw err
   // карта: teacher_id -> [subject_id, ...]
   const subjectsByTeacher = {}
@@ -20,11 +37,11 @@ export async function fetchDictionaries() {
   })
   return {
     subjects: subjects.data,
-    groups: groups.data,
+    groups: groupsRows,
     teachers: teachers.data,
     assistants: assistants.data,
     curators: curators.data || [],
-    students: students.data,
+    students: studentsRows,
     subjectsByTeacher,
   }
 }
@@ -32,12 +49,16 @@ export async function fetchDictionaries() {
 // ---------- УРОКИ ----------
 // period: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' } или null (все)
 export async function fetchLessons(period) {
-  let q = supabase.from('lessons').select('*').order('lesson_date', { ascending: false }).limit(100000)
-  if (period?.from) q = q.gte('lesson_date', period.from)
-  if (period?.to) q = q.lte('lesson_date', period.to)
-  const { data, error } = await q
-  if (error) throw error
-  return data
+  return fetchAllPages(() => {
+    // order по id вторым ключом — иначе при одинаковой дате порядок между
+    // страницами не гарантирован и постраничная выгрузка может задвоить
+    // или пропустить строки
+    let q = supabase.from('lessons').select('*')
+      .order('lesson_date', { ascending: false }).order('id', { ascending: true })
+    if (period?.from) q = q.gte('lesson_date', period.from)
+    if (period?.to) q = q.lte('lesson_date', period.to)
+    return q
+  })
 }
 
 // Было ли тестирование на уроке и с каким максимумом (для повторного открытия «Провести занятие»)
@@ -114,16 +135,16 @@ export async function addSubject(name) {
 
 // Полные справочники, включая архивные — для раздела управления
 export async function fetchAllDictionaries() {
-  const [subjects, groups, teachers, assistants, curators] = await Promise.all([
+  const [subjects, groupsRows, teachers, assistants, curators] = await Promise.all([
     supabase.from('subjects').select('*').order('name'),
-    supabase.from('groups').select('*').order('name'),
+    fetchAllPages(() => supabase.from('groups').select('*').order('name').order('id')),
     supabase.from('teachers').select('*').order('full_name'),
     supabase.from('assistants').select('*').order('full_name'),
     supabase.from('curators').select('*').order('full_name'),
   ])
-  const err = subjects.error || groups.error || teachers.error || assistants.error || curators.error
+  const err = subjects.error || teachers.error || assistants.error || curators.error
   if (err) throw err
-  return { subjects: subjects.data, groups: groups.data, teachers: teachers.data, assistants: assistants.data, curators: curators.data || [] }
+  return { subjects: subjects.data, groups: groupsRows, teachers: teachers.data, assistants: assistants.data, curators: curators.data || [] }
 }
 
 // ---------- ПРИГЛАШЕНИЕ / ПРИВЯЗКА ПРЕПОДАВАТЕЛЕЙ ----------
@@ -250,20 +271,20 @@ export async function fetchGroupTestScores(groupId) {
 // Вся посещаемость за период (для контроля у завуча).
 // Возвращает массив { lesson_id, student_id, present, group_id, lesson_date, teacher_id }
 export async function fetchAttendanceReport(period) {
-  let lq = supabase.from('lessons').select('id, group_id, teacher_id, lesson_date, status').limit(100000)
-  if (period?.from) lq = lq.gte('lesson_date', period.from)
-  if (period?.to) lq = lq.lte('lesson_date', period.to)
-  const { data: lessons, error: le } = await lq
-  if (le) throw le
+  const lessons = await fetchAllPages(() => {
+    let lq = supabase.from('lessons').select('id, group_id, teacher_id, lesson_date, status').order('id')
+    if (period?.from) lq = lq.gte('lesson_date', period.from)
+    if (period?.to) lq = lq.lte('lesson_date', period.to)
+    return lq
+  })
   const lessonIds = lessons.map((l) => l.id)
   if (!lessonIds.length) return { rows: [], lessonsById: {} }
 
-  const { data: att, error: ae } = await supabase
+  const att = await fetchAllPages(() => supabase
     .from('attendance')
     .select('lesson_id, student_id, present')
     .in('lesson_id', lessonIds)
-    .limit(100000)
-  if (ae) throw ae
+    .order('lesson_id').order('student_id'))
 
   const lessonsById = {}
   lessons.forEach((l) => { lessonsById[l.id] = l })
@@ -343,38 +364,33 @@ export async function removeStudentFromGroup(studentId, groupId) {
 }
 // Все ученики (для поиска при добавлении в группу)
 export async function fetchAllStudents() {
-  const { data, error } = await supabase.from('students')
-    .select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').limit(100000)
-  if (error) throw error
-  return data
+  return fetchAllPages(() => supabase.from('students')
+    .select('id, full_name, contact, office, lang').eq('archived', false).order('full_name').order('id'))
 }
 
 // ---------- ТАБЕЛИ (преподаватели + ученики) ----------
 // Единый сбор данных за период для расчёта табелей.
 export async function fetchTimesheetData(period) {
   // Уроки за период (только проведённые важны для табеля, но тянем все — отменённые отфильтруем)
-  let lq = supabase.from('lessons')
-    .select('id, group_id, teacher_id, assistant_id, assistant2_id, curator_id, lesson_date, status, lessons_count, topic')
-    .limit(100000)
-  if (period?.from) lq = lq.gte('lesson_date', period.from)
-  if (period?.to) lq = lq.lte('lesson_date', period.to)
-  const { data: lessons, error: le } = await lq
-  if (le) throw le
+  const lessons = await fetchAllPages(() => {
+    let lq = supabase.from('lessons')
+      .select('id, group_id, teacher_id, assistant_id, assistant2_id, curator_id, lesson_date, status, lessons_count, topic')
+      .order('id')
+    if (period?.from) lq = lq.gte('lesson_date', period.from)
+    if (period?.to) lq = lq.lte('lesson_date', period.to)
+    return lq
+  })
 
   const lessonIds = lessons.map((l) => l.id)
   let attendance = []
   if (lessonIds.length) {
-    const { data: att, error: ae } = await supabase
+    attendance = await fetchAllPages(() => supabase
       .from('attendance').select('lesson_id, student_id, present, absence_reason')
-      .in('lesson_id', lessonIds).limit(100000)
-    if (ae) throw ae
-    attendance = att
+      .in('lesson_id', lessonIds).order('lesson_id').order('student_id'))
   }
 
   // Связки ученик-группа (чтобы знать состав групп)
-  const { data: links, error: lke } = await supabase
-    .from('student_groups').select('student_id, group_id').limit(100000)
-  if (lke) throw lke
+  const links = await fetchAllPages(() => supabase.from('student_groups').select('student_id, group_id').order('student_id').order('group_id'))
 
   return { lessons, attendance, studentGroups: links }
 }
@@ -496,31 +512,30 @@ export async function fetchStudentEvents(studentId) {
 // ---------- ДАШБОРД ----------
 // Сырые данные за период для расчёта KPI и графиков на клиенте.
 export async function fetchDashboardData(period) {
-  let lq = supabase.from('lessons')
-    .select('id, group_id, teacher_id, lesson_date, status, lessons_count, plan_path')
-    .limit(100000)
-  if (period?.from) lq = lq.gte('lesson_date', period.from)
-  if (period?.to) lq = lq.lte('lesson_date', period.to)
-  const { data: lessons, error: le } = await lq
-  if (le) throw le
+  const lessons = await fetchAllPages(() => {
+    let lq = supabase.from('lessons')
+      .select('id, group_id, teacher_id, lesson_date, status, lessons_count, plan_path')
+      .order('id')
+    if (period?.from) lq = lq.gte('lesson_date', period.from)
+    if (period?.to) lq = lq.lte('lesson_date', period.to)
+    return lq
+  })
 
   const ids = lessons.map((l) => l.id)
   let attendance = []
   if (ids.length) {
-    const { data: att, error: ae } = await supabase
+    attendance = await fetchAllPages(() => supabase
       .from('attendance').select('lesson_id, student_id, present, absence_reason')
-      .in('lesson_id', ids).limit(100000)
-    if (ae) throw ae
-    attendance = att
+      .in('lesson_id', ids).order('lesson_id').order('student_id'))
   }
 
-  const [{ data: groups }, { data: students }, { data: links }] = await Promise.all([
-    supabase.from('groups').select('id, name, office, lang, subject_name, capacity').eq('archived', false).limit(100000),
-    supabase.from('students').select('id, full_name, status, office, lang').eq('archived', false).limit(100000),
-    supabase.from('student_groups').select('student_id, group_id').limit(100000),
+  const [groups, students, links] = await Promise.all([
+    fetchAllPages(() => supabase.from('groups').select('id, name, office, lang, subject_name, capacity').eq('archived', false).order('id')),
+    fetchAllPages(() => supabase.from('students').select('id, full_name, status, office, lang').eq('archived', false).order('id')),
+    fetchAllPages(() => supabase.from('student_groups').select('student_id, group_id').order('student_id').order('group_id')),
   ])
 
-  return { lessons, attendance, groups: groups || [], students: students || [], studentGroups: links || [] }
+  return { lessons, attendance, groups, students, studentGroups: links }
 }
 
 // ---------- АНАЛИТИКА: ГРУППЫ / ПРЕПОДАВАТЕЛИ / ПРЕДМЕТЫ ----------
@@ -789,9 +804,7 @@ export async function deletePayment(id) {
 
 // ---------- ГРУППЫ (создание/редактирование) ----------
 export async function fetchAllGroups() {
-  const { data, error } = await supabase.from('groups').select('*').eq('archived', false).order('name').limit(100000)
-  if (error) throw error
-  return data || []
+  return fetchAllPages(() => supabase.from('groups').select('*').eq('archived', false).order('name').order('id'))
 }
 export async function createGroup(fields) {
   const { error } = await supabase.from('groups').insert(fields)
