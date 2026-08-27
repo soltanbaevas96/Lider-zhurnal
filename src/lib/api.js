@@ -32,7 +32,7 @@ export async function fetchDictionaries() {
 // ---------- УРОКИ ----------
 // period: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' } или null (все)
 export async function fetchLessons(period) {
-  let q = supabase.from('lessons').select('*').order('lesson_date', { ascending: false })
+  let q = supabase.from('lessons').select('*').order('lesson_date', { ascending: false }).limit(100000)
   if (period?.from) q = q.gte('lesson_date', period.from)
   if (period?.to) q = q.lte('lesson_date', period.to)
   const { data, error } = await q
@@ -250,7 +250,7 @@ export async function fetchGroupTestScores(groupId) {
 // Вся посещаемость за период (для контроля у завуча).
 // Возвращает массив { lesson_id, student_id, present, group_id, lesson_date, teacher_id }
 export async function fetchAttendanceReport(period) {
-  let lq = supabase.from('lessons').select('id, group_id, teacher_id, lesson_date, status')
+  let lq = supabase.from('lessons').select('id, group_id, teacher_id, lesson_date, status').limit(100000)
   if (period?.from) lq = lq.gte('lesson_date', period.from)
   if (period?.to) lq = lq.lte('lesson_date', period.to)
   const { data: lessons, error: le } = await lq
@@ -262,6 +262,7 @@ export async function fetchAttendanceReport(period) {
     .from('attendance')
     .select('lesson_id, student_id, present')
     .in('lesson_id', lessonIds)
+    .limit(100000)
   if (ae) throw ae
 
   const lessonsById = {}
@@ -354,6 +355,7 @@ export async function fetchTimesheetData(period) {
   // Уроки за период (только проведённые важны для табеля, но тянем все — отменённые отфильтруем)
   let lq = supabase.from('lessons')
     .select('id, group_id, teacher_id, assistant_id, assistant2_id, curator_id, lesson_date, status, lessons_count, topic')
+    .limit(100000)
   if (period?.from) lq = lq.gte('lesson_date', period.from)
   if (period?.to) lq = lq.lte('lesson_date', period.to)
   const { data: lessons, error: le } = await lq
@@ -364,7 +366,7 @@ export async function fetchTimesheetData(period) {
   if (lessonIds.length) {
     const { data: att, error: ae } = await supabase
       .from('attendance').select('lesson_id, student_id, present, absence_reason')
-      .in('lesson_id', lessonIds)
+      .in('lesson_id', lessonIds).limit(100000)
     if (ae) throw ae
     attendance = att
   }
@@ -496,6 +498,7 @@ export async function fetchStudentEvents(studentId) {
 export async function fetchDashboardData(period) {
   let lq = supabase.from('lessons')
     .select('id, group_id, teacher_id, lesson_date, status, lessons_count, plan_path')
+    .limit(100000)
   if (period?.from) lq = lq.gte('lesson_date', period.from)
   if (period?.to) lq = lq.lte('lesson_date', period.to)
   const { data: lessons, error: le } = await lq
@@ -506,13 +509,13 @@ export async function fetchDashboardData(period) {
   if (ids.length) {
     const { data: att, error: ae } = await supabase
       .from('attendance').select('lesson_id, student_id, present, absence_reason')
-      .in('lesson_id', ids)
+      .in('lesson_id', ids).limit(100000)
     if (ae) throw ae
     attendance = att
   }
 
   const [{ data: groups }, { data: students }, { data: links }] = await Promise.all([
-    supabase.from('groups').select('id, name, office, lang, subject_name, capacity').eq('archived', false),
+    supabase.from('groups').select('id, name, office, lang, subject_name, capacity').eq('archived', false).limit(100000),
     supabase.from('students').select('id, full_name, status, office, lang').eq('archived', false).limit(100000),
     supabase.from('student_groups').select('student_id, group_id').limit(100000),
   ])
