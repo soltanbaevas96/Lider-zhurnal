@@ -119,6 +119,7 @@ function PlansCheck({ dict }) {
   const [err, setErr] = useState('')
   // { level: 'root' } | { level: 'person', kind: 'teacher'|'curator', id } | { level: 'group', kind: 'teacher', id, groupId }
   const [drill, setDrill] = useState({ level: 'root' })
+  const [rootTab, setRootTab] = useState('teacher') // teacher | curator — подвкладки на корневом уровне
 
   const range = useMemo(() => periodRange(period), [period])
 
@@ -254,53 +255,60 @@ function PlansCheck({ dict }) {
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
+      {drill.level === 'root' && (
+        <div style={{ display: 'flex', gap: 7, marginBottom: 14 }}>
+          <button onClick={() => setRootTab('teacher')} className="rowflex"
+            style={{ gap: 6, padding: '8px 15px', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              border: rootTab === 'teacher' ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+              background: rootTab === 'teacher' ? C.brand : '#fff', color: rootTab === 'teacher' ? '#fff' : C.slate }}>
+            <GraduationCap size={15} /> Преподаватели
+            <span style={{ fontSize: 11, fontWeight: 800, padding: '1px 7px', borderRadius: 20,
+              background: rootTab === 'teacher' ? 'rgba(255,255,255,.25)' : C.grey, color: rootTab === 'teacher' ? '#fff' : C.slate }}>{teacherStats.length}</span>
+          </button>
+          <button onClick={() => setRootTab('curator')} className="rowflex"
+            style={{ gap: 6, padding: '8px 15px', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              border: rootTab === 'curator' ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+              background: rootTab === 'curator' ? C.brand : '#fff', color: rootTab === 'curator' ? '#fff' : C.slate }}>
+            <Users size={15} /> Кураторы
+            <span style={{ fontSize: 11, fontWeight: 800, padding: '1px 7px', borderRadius: 20,
+              background: rootTab === 'curator' ? 'rgba(255,255,255,.25)' : C.grey, color: rootTab === 'curator' ? '#fff' : C.slate }}>{curatorStats.length}</span>
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
       ) : drill.level === 'root' ? (
-        !teacherStats.length && !curatorStats.length ? (
-          <Empty icon={FileText} title="Занятий нет" text="За этот период ещё не было проведённых занятий." />
+        rootTab === 'teacher' ? (
+          !teacherStats.length ? (
+            <Empty icon={GraduationCap} title="Занятий нет" text="За этот период ни один преподаватель не провёл занятий." />
+          ) : (
+            <DataTable columns={personColumns} rows={teacherStats} pageSize={teacherStats.length}
+              initialSort={{ key: 'pct', dir: 'asc' }}
+              onRowClick={(r) => setDrill({ level: 'person', kind: 'teacher', id: r.id })} />
+          )
         ) : (
-          <>
-            {teacherStats.length > 0 && (
-              <>
-                <SectionTitle icon={GraduationCap}>Преподаватели</SectionTitle>
-                <DataTable columns={personColumns} rows={teacherStats} pageSize={30}
-                  initialSort={{ key: 'pct', dir: 'asc' }}
-                  onRowClick={(r) => setDrill({ level: 'person', kind: 'teacher', id: r.id })} />
-              </>
-            )}
-            {curatorStats.length > 0 && (
-              <div style={{ marginTop: 20 }}>
-                <SectionTitle icon={Users}>Кураторы</SectionTitle>
-                <DataTable columns={personColumns} rows={curatorStats} pageSize={30}
-                  initialSort={{ key: 'pct', dir: 'asc' }}
-                  onRowClick={(r) => setDrill({ level: 'person', kind: 'curator', id: r.id })} />
-              </div>
-            )}
-          </>
+          !curatorStats.length ? (
+            <Empty icon={Users} title="Занятий нет" text="За этот период ни один куратор не провёл занятий." />
+          ) : (
+            <DataTable columns={personColumns} rows={curatorStats} pageSize={curatorStats.length}
+              initialSort={{ key: 'pct', dir: 'asc' }}
+              onRowClick={(r) => setDrill({ level: 'person', kind: 'curator', id: r.id })} />
+          )
         )
       ) : isGroupList ? (
         !groupStats.length ? (
           <Empty icon={Layers} title="Групп нет" text="За этот период у преподавателя нет проведённых занятий." />
         ) : (
-          <DataTable columns={groupColumns} rows={groupStats} pageSize={30}
+          <DataTable columns={groupColumns} rows={groupStats} pageSize={groupStats.length}
             initialSort={{ key: 'pct', dir: 'asc' }}
             onRowClick={(r) => setDrill({ level: 'group', kind: 'teacher', id: drill.id, groupId: r.id })} />
         )
       ) : isLessonList && !lessonsList.length ? (
         <Empty icon={FileText} title="Занятий нет" text="За этот период здесь нет проведённых занятий." />
       ) : (
-        <DataTable columns={lessonColumns} rows={lessonsList} pageSize={30} initialSort={{ key: 'lesson_date', dir: 'desc' }} />
+        <DataTable columns={lessonColumns} rows={lessonsList} pageSize={lessonsList.length || 1} initialSort={{ key: 'lesson_date', dir: 'desc' }} />
       )}
-    </div>
-  )
-}
-
-function SectionTitle({ icon: Icon, children }) {
-  return (
-    <div className="rowflex" style={{ gap: 7, marginBottom: 9 }}>
-      <Icon size={15} color={C.slate} />
-      <span style={{ fontSize: 12.5, fontWeight: 700, color: C.slate, textTransform: 'uppercase', letterSpacing: '.03em' }}>{children}</span>
     </div>
   )
 }
