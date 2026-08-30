@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck, Banknote } from 'lucide-react'
+import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck, Banknote, Award } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, currentMonth, periodRange, periodLabelOf } from './lib/utils'
@@ -18,6 +18,7 @@ import Analytics from './pages/Analytics'
 import Payroll from './pages/Payroll'
 import PaymentsView from './pages/PaymentsView'
 import Control from './pages/Control'
+import EntBase from './pages/EntBase'
 import Schedule from './pages/Schedule'
 import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
@@ -167,6 +168,7 @@ export default function App() {
                 { k: 'schedule', t: 'Расписание', icon: CalendarClock },
                 { k: 'analytics', t: 'Аналитика', icon: BarChart3 },
                 { k: 'risks', t: 'Риски', icon: AlertTriangle },
+                { k: 'entbase', t: 'База учеников', icon: Award },
                 { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
                 { k: 'payroll', t: 'Зарплата', icon: Wallet },
                 { k: 'payments', t: 'Оплаты', icon: Banknote },
@@ -219,6 +221,8 @@ export default function App() {
           <Analytics onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'risks' ? (
           <Risks onOpenStudent={(id) => setOpenStudent(id)} />
+        ) : isManager && view === 'entbase' ? (
+          <EntBase dict={dict} />
         ) : isManager && view === 'schedule' ? (
           <Schedule dict={dict} isAdmin={isAdmin} />
         ) : isManager && view === 'control' ? (

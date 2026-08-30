@@ -952,3 +952,85 @@ export async function deleteCuratorLesson(id) {
   const { error } = await supabase.rpc('delete_curator_lesson', { p_lesson_id: id })
   if (error) throw error
 }
+
+// ---------- БАЗА УЧЕНИКОВ / ЕНТ ----------
+// Тот же students, только с полями, нужными для базы ЕНТ + профильными предметами.
+export async function fetchEntStudents() {
+  return fetchAllPages(() => supabase.from('students')
+    .select('id, full_name, office, lang, school, grade, profile_subject_1_id, profile_subject_2_id')
+    .eq('archived', false).order('full_name').order('id'))
+}
+
+// Уникальные школы, которые уже есть в базе — для подсказки при вводе
+// (чтобы не плодить «Школа №10» / «10 школа» / «СОШ 10»)
+export async function fetchKnownSchools() {
+  const rows = await fetchAllPages(() => supabase.from('students')
+    .select('school').eq('archived', false).order('school'))
+  return [...new Set(rows.map((r) => (r.school || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'))
+}
+
+// Школа + профильные предметы ученика (редактирует только завуч — RLS)
+export async function updateStudentEntProfile(studentId, { school, profile_subject_1_id, profile_subject_2_id }) {
+  const { error } = await supabase.from('students').update({
+    school: school?.trim() || null,
+    profile_subject_1_id: profile_subject_1_id || null,
+    profile_subject_2_id: profile_subject_2_id || null,
+  }).eq('id', studentId)
+  if (error) throw error
+}
+
+// Последний и лучший общий балл по каждому ученику — одним запросом
+// (не дёргаем ent_attempts отдельно на каждого ученика в списке)
+export async function fetchEntStats() {
+  const rows = await fetchAllPages(() => supabase.from('ent_attempts')
+    .select('student_id, attempt_date, total_score').order('student_id').order('attempt_date'))
+  const byStudent = {}
+  rows.forEach((r) => {
+    const s = (byStudent[r.student_id] ||= { last: null, lastDate: null, best: null, count: 0 })
+    s.count++
+    if (!s.lastDate || r.attempt_date >= s.lastDate) { s.last = r.total_score; s.lastDate = r.attempt_date }
+    if (s.best == null || r.total_score > s.best) s.best = r.total_score
+  })
+  return byStudent
+}
+
+// Попытки пробного ЕНТ одного ученика, от старой к новой
+export async function fetchEntAttempts(studentId) {
+  const { data, error } = await supabase.from('ent_attempts')
+    .select('*').eq('student_id', studentId).order('attempt_date').order('created_at')
+  if (error) throw error
+  return data || []
+}
+
+export async function addEntAttempt(studentId, fields) {
+  const { error } = await supabase.from('ent_attempts').insert({ student_id: studentId, ...entAttemptRow(fields) })
+  if (error) throw error
+}
+
+export async function updateEntAttempt(id, fields) {
+  const { error } = await supabase.from('ent_attempts')
+    .update({ ...entAttemptRow(fields), updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteEntAttempt(id) {
+  const { error } = await supabase.from('ent_attempts').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Общие поля попытки — total_score НЕ передаём, он считается в БД (generated column)
+function entAttemptRow(f) {
+  return {
+    attempt_date: f.attempt_date,
+    history_kz_score: Number(f.history_kz_score) || 0,
+    reading_score: Number(f.reading_score) || 0,
+    math_literacy_score: Number(f.math_literacy_score) || 0,
+    subject1_id: f.subject1_id || null,
+    subject1_name: f.subject1_name,
+    subject1_score: Number(f.subject1_score) || 0,
+    subject2_id: f.subject2_id || null,
+    subject2_name: f.subject2_name,
+    subject2_score: Number(f.subject2_score) || 0,
+    comment: f.comment?.trim() || null,
+  }
+}
