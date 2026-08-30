@@ -954,11 +954,22 @@ export async function deleteCuratorLesson(id) {
 }
 
 // ---------- БАЗА УЧЕНИКОВ / ЕНТ ----------
-// Тот же students, только с полями, нужными для базы ЕНТ + профильными предметами.
-export async function fetchEntStudents() {
-  return fetchAllPages(() => supabase.from('students')
-    .select('id, full_name, office, lang, school, grade, profile_subject_1_id, profile_subject_2_id')
-    .eq('archived', false).order('full_name').order('id'))
+// Единый набор данных для всего модуля ЕНТ: ученики (с профилем),
+// их группы и все попытки — читаем один раз, дальше вкладки/аналитика/
+// экспорт считаются на фронте из этого набора (95 учеников и даже
+// 500-1000 с историей попыток — это тысячи строк, не миллионы,
+// клиенту это по силам; агрегаций-RPC не заводим, чтобы не плодить
+// сущности сверх необходимого).
+export async function fetchEntDataset() {
+  const [students, links, groups, attempts] = await Promise.all([
+    fetchAllPages(() => supabase.from('students')
+      .select('id, full_name, office, lang, school, grade, profile_subject_1_id, profile_subject_2_id')
+      .eq('archived', false).order('full_name').order('id')),
+    fetchAllPages(() => supabase.from('student_groups').select('student_id, group_id').order('student_id').order('group_id')),
+    fetchAllPages(() => supabase.from('groups').select('id, name, office').eq('archived', false).order('name')),
+    fetchAllPages(() => supabase.from('ent_attempts').select('*').order('student_id').order('attempt_date').order('created_at')),
+  ])
+  return { students, links, groups, attempts }
 }
 
 // Уникальные школы, которые уже есть в базе — для подсказки при вводе
@@ -977,21 +988,6 @@ export async function updateStudentEntProfile(studentId, { school, profile_subje
     profile_subject_2_id: profile_subject_2_id || null,
   }).eq('id', studentId)
   if (error) throw error
-}
-
-// Последний и лучший общий балл по каждому ученику — одним запросом
-// (не дёргаем ent_attempts отдельно на каждого ученика в списке)
-export async function fetchEntStats() {
-  const rows = await fetchAllPages(() => supabase.from('ent_attempts')
-    .select('student_id, attempt_date, total_score').order('student_id').order('attempt_date'))
-  const byStudent = {}
-  rows.forEach((r) => {
-    const s = (byStudent[r.student_id] ||= { last: null, lastDate: null, best: null, count: 0 })
-    s.count++
-    if (!s.lastDate || r.attempt_date >= s.lastDate) { s.last = r.total_score; s.lastDate = r.attempt_date }
-    if (s.best == null || r.total_score > s.best) s.best = r.total_score
-  })
-  return byStudent
 }
 
 // Попытки пробного ЕНТ одного ученика, от старой к новой
@@ -1015,6 +1011,14 @@ export async function updateEntAttempt(id, fields) {
 
 export async function deleteEntAttempt(id) {
   const { error } = await supabase.from('ent_attempts').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Массовый ввод результатов по группе — одной попытки сразу на всех
+// заполненных учеников (одна вставка вместо N запросов).
+export async function addEntAttemptsBulk(rows) {
+  const payload = rows.map((r) => ({ student_id: r.studentId, ...entAttemptRow(r) }))
+  const { error } = await supabase.from('ent_attempts').insert(payload)
   if (error) throw error
 }
 
