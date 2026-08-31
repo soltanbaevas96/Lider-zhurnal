@@ -831,6 +831,20 @@ export async function fetchExtraLessons(from, to) {
 }
 
 // ---------- ОПЛАТЫ ----------
+// Основной срез для вкладки «Ученики»: по каждому ученику — входной
+// взнос, оплата за выбранный месяц, тариф, долг — всё посчитано в БД.
+// Офис office-менеджера сервер подставляет сам (RPC), что бы ни пришло с фронта.
+export async function fetchPaymentsOverview(office, month) {
+  const { data, error } = await supabase.rpc('get_payments_overview', { p_office: office || null, p_month: month || null })
+  if (error) throw error
+  return data || []
+}
+// Сколько реально собрано по каждому месяцу (для вкладки «По месяцам»)
+export async function fetchMonthlyPaymentTotals(office) {
+  const { data, error } = await supabase.rpc('get_monthly_payment_totals', { p_office: office || null })
+  if (error) throw error
+  return data || []
+}
 export async function fetchStudentsPayments(office) {
   const { data, error } = await supabase.rpc('get_students_payments', { p_office: office || null })
   if (error) throw error
@@ -841,15 +855,39 @@ export async function fetchStudentPayments(studentId) {
   if (error) throw error
   return data || []
 }
-export async function addPayment(studentId, amount, paidAt, method, note) {
+// type: 'entry_fee' | 'monthly'; period: 'YYYY-MM' или null (для entry_fee не нужен)
+export async function addPayment(studentId, amount, paidAt, method, note, type = 'monthly', period = null) {
   const { error } = await supabase.rpc('add_payment', {
     p_student_id: studentId, p_amount: Number(amount) || 0,
     p_paid_at: paidAt || null, p_method: method || null, p_note: note || null,
+    p_type: type, p_period: period || null,
+  })
+  if (error) throw error
+}
+export async function updatePayment(id, { amount, paidAt, method, note, type, period }) {
+  const { error } = await supabase.rpc('update_payment', {
+    p_id: id, p_amount: Number(amount) || 0, p_paid_at: paidAt || null,
+    p_method: method || null, p_note: note || null, p_type: type, p_period: period || null,
   })
   if (error) throw error
 }
 export async function deletePayment(id) {
   const { error } = await supabase.rpc('delete_payment', { p_id: id })
+  if (error) throw error
+}
+
+// Тариф группы (₸/месяц) — редактирует тот, кто уже может редактировать группу
+export async function setGroupMonthlyFee(groupId, fee) {
+  const { error } = await supabase.from('groups').update({ monthly_fee: fee === '' || fee == null ? null : Number(fee) }).eq('id', groupId)
+  if (error) throw error
+}
+// Индивидуальные финансовые настройки ученика: свой тариф, входной взнос
+export async function updateStudentPaymentSettings(studentId, { custom_monthly_fee, entry_fee_required, entry_fee_amount }) {
+  const { error } = await supabase.from('students').update({
+    custom_monthly_fee: custom_monthly_fee === '' || custom_monthly_fee == null ? null : Number(custom_monthly_fee),
+    entry_fee_required: !!entry_fee_required,
+    entry_fee_amount: entry_fee_amount === '' || entry_fee_amount == null ? null : Number(entry_fee_amount),
+  }).eq('id', studentId)
   if (error) throw error
 }
 
