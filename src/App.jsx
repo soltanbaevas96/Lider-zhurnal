@@ -230,7 +230,7 @@ export default function App() {
         ) : canSeeFinance && view === 'payroll' ? (
           <Payroll isAdmin={isAdmin} canEditRate={isAdmin || isAccountant} />
         ) : canSeeFinance && view === 'payments' ? (
-          <PaymentsView onOpenStudent={(id) => setOpenStudent(id)} />
+          <PaymentsView />
         ) : canSeeFinance && view === 'timesheets' ? (
           <Timesheets dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isAdmin && view === 'manage' ? (

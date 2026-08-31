@@ -1,15 +1,13 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Search, Users, Building2, Wallet, Layers, X, Check, Trash2, Calendar, AlertTriangle } from 'lucide-react'
+import { Plus, Search, Users, Building2, Wallet, Layers, X, Check, AlertTriangle } from 'lucide-react'
 import {
   fetchStudentsWithGroups, fetchAllGroups, createGroup, updateGroup,
-  fetchStudentsPayments, fetchStudentPayments, addPayment, deletePayment,
 } from '../lib/api'
-import { C, initials, avColorByIndex, OFFICES, fmtDate } from '../lib/utils'
+import { C, initials, avColorByIndex, OFFICES } from '../lib/utils'
 import DataTable from '../components/DataTable'
 import { StudentModal } from './Manage'
 import Risks from './Risks'
-
-const money = (n) => Number(n || 0).toLocaleString('ru-RU')
+import PaymentsBase from './PaymentsBase'
 
 export default function OfficeManagerCabinet({ managerOffice, isSenior, onOpenStudent }) {
   const [tab, setTab] = useState('students')
@@ -65,7 +63,7 @@ export default function OfficeManagerCabinet({ managerOffice, isSenior, onOpenSt
 
       {tab === 'students' && <StudentsTab homeOffice={managerOffice} onOpenStudent={onOpenStudent} />}
       {tab === 'groups' && <GroupsTab homeOffice={managerOffice} />}
-      {tab === 'payments' && <PaymentsTab office={activeOffice} onOpenStudent={onOpenStudent} />}
+      {tab === 'payments' && <PaymentsBase fixedOffice={activeOffice} />}
       {tab === 'risks' && <Risks fixedOffice={activeOffice} onOpenStudent={onOpenStudent} />}
     </div>
   )
@@ -269,163 +267,6 @@ function GroupModal({ row, office, onClose, onDone }) {
       <div style={{ fontSize: 12, color: C.slate, marginTop: 2 }}>Офис: <b>{office}</b></div>
       {err && <div style={{ color: '#c2360b', fontSize: 13, marginTop: 8 }}>{err}</div>}
       <SaveBtn onClick={save} busy={busy} text={row ? 'Сохранить' : 'Создать'} />
-    </Modal>
-  )
-}
-
-export function PaymentsTab({ office, onOpenStudent }) {
-  const [rows, setRows] = useState(null)
-  const [q, setQ] = useState('')
-  const [payFor, setPayFor] = useState(null)
-  const [err, setErr] = useState('')
-
-  async function reload() {
-    try { setRows(await fetchStudentsPayments(office)) } catch (e) { setErr(e.message) }
-  }
-  useEffect(() => { reload() }, [office])
-
-  const filtered = (rows || []).filter((s) => {
-    const t = q.toLowerCase().trim()
-    return !t || (s.full_name || '').toLowerCase().includes(t) || (s.parent_name || '').toLowerCase().includes(t)
-  })
-  const totalAll = filtered.reduce((n, s) => n + Number(s.total_paid || 0), 0)
-
-  const columns = [
-    { key: 'full_name', label: 'Ученик', render: (s) => (
-      <span style={{ fontWeight: 600, color: C.brand }}>{s.full_name}</span>
-    )},
-    { key: 'grade', label: 'Класс', width: 70, render: (s) => s.grade || '—' },
-    { key: 'parent_name', label: 'Родитель', render: (s) => s.parent_name || '—' },
-    { key: 'total_paid', label: 'Всего оплачено', num: true, width: 150,
-      sortValue: (s) => Number(s.total_paid || 0),
-      render: (s) => <b style={{ color: Number(s.total_paid) > 0 ? C.ok : C.faint }}>{money(s.total_paid)} ₸</b> },
-    { key: 'last_paid', label: 'Последняя оплата', width: 140, render: (s) => s.last_paid ? fmtDate(s.last_paid) : <span style={{ color: C.faint }}>ещё не платил</span> },
-    { key: 'add', label: '', width: 160, sortable: false, render: (s) => (
-      <button onClick={(e) => { e.stopPropagation(); setPayFor(s) }} className="rowflex"
-        style={{ gap: 5, padding: '6px 12px', background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
-        <Plus size={13} /> История и оплата
-      </button>
-    )},
-  ]
-
-  return (
-    <div>
-      <div className="rowflex" style={{ gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-          <Search size={17} color={C.faint} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика…"
-            style={{ width: '100%', padding: '11px 14px 11px 42px', border: `1px solid ${C.line}`, borderRadius: 12, fontSize: 14, outline: 'none' }} />
-        </div>
-        <div style={{ background: C.brandSoft, border: '1px solid #c7d2fe', borderRadius: 11, padding: '10px 16px' }}>
-          <span style={{ fontSize: 12, color: C.slate }}>Собрано: </span>
-          <b style={{ fontSize: 15, color: C.brand }}>{money(totalAll)} ₸</b>
-        </div>
-      </div>
-      {err && <ErrBox>{err}</ErrBox>}
-      <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>
-        Учеников: <b>{filtered.length}</b> · нажмите на ученика, чтобы увидеть историю оплат
-      </div>
-      {rows === null ? <Loading /> : filtered.length === 0 ? (
-        <Empty icon={Wallet} text="Учеников не найдено" />
-      ) : (
-        <DataTable columns={columns} rows={filtered} pageSize={30} onRowClick={(s) => setPayFor(s)} />
-      )}
-      {payFor && (
-        <PaymentModal student={payFor} onClose={() => setPayFor(null)}
-          onDone={() => { setPayFor(null); reload() }} />
-      )}
-    </div>
-  )
-}
-
-function PaymentModal({ student, onClose, onDone }) {
-  const [history, setHistory] = useState(null)
-  const [amount, setAmount] = useState('')
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10))
-  const [method, setMethod] = useState('')
-  const [note, setNote] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  async function loadHistory() {
-    try { setHistory(await fetchStudentPayments(student.id)) } catch { setHistory([]) }
-  }
-  useEffect(() => { loadHistory() }, [])
-
-  async function save() {
-    if (!amount || Number(amount) <= 0) { setErr('Введите сумму'); return }
-    setBusy(true); setErr('')
-    try {
-      await addPayment(student.id, amount, paidAt, method, note)
-      setAmount(''); setNote('')
-      await loadHistory(); setBusy(false)
-    } catch (e) { setErr(e.message); setBusy(false) }
-  }
-  async function remove(id) {
-    try { await deletePayment(id); await loadHistory() } catch (e) { setErr(e.message) }
-  }
-
-  const sortedHistory = [...(history || [])].sort((a, b) => (b.paid_at || '').localeCompare(a.paid_at || ''))
-  const total = sortedHistory.reduce((n, p) => n + Number(p.amount || 0), 0)
-
-  return (
-    <Modal title="История и оплата" onClose={onClose} wide onDoneClose={onDone}>
-      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>{student.full_name}</div>
-      <div style={{ fontSize: 12.5, color: C.slate, marginBottom: 14 }}>
-        Всего оплачено: <b style={{ color: C.ok }}>{money(total)} ₸</b>
-        {sortedHistory.length > 0 && <> · {sortedHistory.length} {sortedHistory.length === 1 ? 'платёж' : 'платежей'}</>}
-      </div>
-
-      <div style={{ background: C.grey, borderRadius: 12, padding: 14, marginBottom: 14 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>Новая оплата</div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ flex: '1 1 120px' }}>
-            <Field label="Сумма, ₸"><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="напр. 25000" style={inp} autoFocus /></Field>
-          </div>
-          <div style={{ flex: '1 1 130px' }}>
-            <Field label="Дата"><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} style={inp} /></Field>
-          </div>
-          <div style={{ flex: '1 1 120px' }}>
-            <Field label="Способ">
-              <select value={method} onChange={(e) => setMethod(e.target.value)} style={inp}>
-                <option value="">—</option>
-                <option value="Каспи">Каспи</option>
-                <option value="Карта">Карта</option>
-                <option value="Наличные">Наличные</option>
-              </select>
-            </Field>
-          </div>
-        </div>
-        <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="напр. за сентябрь" style={inp} /></Field>
-        {err && <div style={{ color: '#c2360b', fontSize: 13, marginTop: 6 }}>{err}</div>}
-        <button onClick={save} disabled={busy} className="rowflex"
-          style={{ gap: 6, marginTop: 10, padding: '9px 16px', background: C.brand, color: '#fff', border: 'none', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
-          <Plus size={15} /> Добавить оплату
-        </button>
-      </div>
-
-      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>История оплат</div>
-      {history === null ? <div style={{ color: C.slate, fontSize: 13 }}>Загрузка…</div>
-        : sortedHistory.length === 0 ? (
-          <div style={{ padding: '16px 12px', textAlign: 'center', color: C.faint, fontSize: 13, background: C.grey, borderRadius: 10 }}>
-            Ещё ни одной оплаты не записано — добавьте первую выше.
-          </div>
-        ) : (
-          <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: 'hidden', maxHeight: 240, overflowY: 'auto' }}>
-            {sortedHistory.map((p, i) => (
-              <div key={p.id} className="rowflex" style={{ gap: 10, padding: '10px 12px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
-                <Calendar size={14} color={C.faint} />
-                <span style={{ fontSize: 13 }}>{fmtDate(p.paid_at)}</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: C.ok }}>{money(p.amount)} ₸</span>
-                {p.method && <span style={{ fontSize: 11.5, color: C.slate, background: C.grey, padding: '2px 8px', borderRadius: 20 }}>{p.method}</span>}
-                {p.note && <span style={{ fontSize: 12, color: C.faint }}>{p.note}</span>}
-                <button onClick={() => remove(p.id)} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }} title="Удалить">
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
     </Modal>
   )
 }

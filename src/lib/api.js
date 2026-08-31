@@ -876,6 +876,15 @@ export async function deletePayment(id) {
   if (error) throw error
 }
 
+// Группы (с тарифом) + связи ученик-группа — для фильтра/аналитики по группам во вкладке «Оплаты»
+export async function fetchPaymentsGroupsData() {
+  const [groups, links] = await Promise.all([
+    fetchAllPages(() => supabase.from('groups').select('id, name, office, monthly_fee').eq('archived', false).order('name')),
+    fetchAllPages(() => supabase.from('student_groups').select('student_id, group_id').order('student_id').order('group_id')),
+  ])
+  return { groups, links }
+}
+
 // Тариф группы (₸/месяц) — редактирует тот, кто уже может редактировать группу
 export async function setGroupMonthlyFee(groupId, fee) {
   const { error } = await supabase.from('groups').update({ monthly_fee: fee === '' || fee == null ? null : Number(fee) }).eq('id', groupId)
