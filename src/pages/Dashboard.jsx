@@ -8,7 +8,7 @@ import {
   AreaChart, Area, Cell,
 } from 'recharts'
 import { fetchDashboard } from '../lib/api'
-import { C, periodRange, periodLabelOf } from '../lib/utils'
+import { C, periodRange, periodLabelOf, shiftRange } from '../lib/utils'
 import PeriodPicker from '../components/PeriodPicker'
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
@@ -457,11 +457,3 @@ function delta(cur, prev) {
   return { value: d, good: d > 0 }
 }
 
-function shiftRange(r) {
-  if (!r?.from || !r?.to) return null
-  const from = new Date(r.from), to = new Date(r.to)
-  const days = Math.round((to - from) / 86400000) + 1
-  const pTo = new Date(from); pTo.setDate(pTo.getDate() - 1)
-  const pFrom = new Date(pTo); pFrom.setDate(pFrom.getDate() - days + 1)
-  return { from: pFrom.toISOString().slice(0, 10), to: pTo.toISOString().slice(0, 10) }
-}

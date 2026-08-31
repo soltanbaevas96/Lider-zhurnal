@@ -904,6 +904,11 @@ export async function updateStudentPaymentSettings(studentId, { custom_monthly_f
 export async function fetchAllGroups() {
   return fetchAllPages(() => supabase.from('groups').select('*').eq('archived', false).order('name').order('id'))
 }
+// Связи ученик-группа целиком (для полного ростера группы в Сводке —
+// не только тех, у кого есть отметки посещаемости за период)
+export async function fetchStudentGroupLinks() {
+  return fetchAllPages(() => supabase.from('student_groups').select('student_id, group_id').order('student_id').order('group_id'))
+}
 export async function createGroup(fields) {
   const { error } = await supabase.from('groups').insert(fields)
   if (error) throw error

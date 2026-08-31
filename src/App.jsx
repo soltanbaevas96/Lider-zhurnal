@@ -247,7 +247,7 @@ export default function App() {
           )
         ) : isManager ? (
           <AdminCabinet dict={dict} lessons={lessons} period={period} setPeriod={setPeriod} periodLabel={periodLabel}
-            onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
+            onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isCurator ? (
           <CuratorCabinet curator={curator} />
         ) : isAccountant ? (

@@ -112,6 +112,17 @@ export function periodRange(period) {
   return null
 }
 
+// Сдвигает диапазон { from, to } на такую же длину назад — для сравнения
+// «текущий период vs предыдущий» (Дашборд, Сводка).
+export function shiftRange(r) {
+  if (!r?.from || !r?.to) return null
+  const from = new Date(r.from), to = new Date(r.to)
+  const days = Math.round((to - from) / 86400000) + 1
+  const pTo = new Date(from); pTo.setDate(pTo.getDate() - 1)
+  const pFrom = new Date(pTo); pFrom.setDate(pFrom.getDate() - days + 1)
+  return { from: pFrom.toISOString().slice(0, 10), to: pTo.toISOString().slice(0, 10) }
+}
+
 // ---------- ПАЛИТРА ----------
 export const C = {
   ink: '#14183a', slate: '#6b7194', faint: '#9aa0c0', line: '#e8e9f3',
