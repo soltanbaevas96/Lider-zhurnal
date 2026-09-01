@@ -2,12 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Users, GraduationCap, Download, CalendarDays, TrendingDown } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { fetchTimesheetData } from '../lib/api'
-import { C, nameOf, lessonCount, subjectOf, fmtDate, periodRange, periodLabelOf } from '../lib/utils'
+import { C, nameOf, lessonCount, subjectOf, fmtDate, periodRange, periodLabelOf, currentMonth } from '../lib/utils'
 import PeriodPicker from '../components/PeriodPicker'
 
 export default function Timesheets({ dict, onOpenStudent }) {
   const [tab, setTab] = useState('teachers') // teachers | students
-  const [period, setPeriod] = useState({ mode: 'month', month: new Date().toISOString().slice(0, 7) })
+  // currentMonth() читает локальные getFullYear()/getMonth(), а не
+  // toISOString() (который переводит в UTC) — в часовом поясе Казахстана
+  // (UTC+5) старая версия могла в первые часы нового месяца показать
+  // предыдущий месяц вместо текущего (тот же баг чинился в Зарплате/
+  // Дашборде/Аналитике этой сессии).
+  const [period, setPeriod] = useState(() => ({ mode: 'month', month: currentMonth() }))
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
