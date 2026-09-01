@@ -1,12 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Wallet, Download, Lock, Unlock, ChevronLeft, ChevronRight, Pencil, Check, X, AlertTriangle,
+  Wallet, Download, Lock, Unlock, ChevronLeft, ChevronRight, Pencil, X, AlertTriangle, Search, RotateCw,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import {
   fetchPayroll, closePayroll, reopenPayroll, updateTeacherRate,
 } from '../lib/api'
-import { C } from '../lib/utils'
+import { C, currentMonth, shiftMonthStr, monthRange } from '../lib/utils'
 import DataTable from '../components/DataTable'
 import Curators from './Curators'
 
@@ -15,31 +15,62 @@ const MONTHS = ['январь', 'февраль', 'март', 'апрель', '�
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
 
+// 'YYYY-MM-DD' -> 'ДД.ММ.ГГГГ' — чистая строковая работа, без Date/toISOString
+// (см. п.9 ТЗ про timezone: любое прохождение через new Date().toISOString()
+// в часовом поясе Казахстана (UTC+5) может сдвинуть календарную дату).
+function fmtDMY(iso) {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-')
+  return `${d}.${m}.${y}`
+}
+
 export default function Payroll({ isAdmin, canEditRate }) {
   const canEdit = canEditRate ?? isAdmin
-  const [payTab, setPayTab] = useState('teachers') // teachers | curators
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [payTab, setPayTab] = useState('teachers') // teachers | curators | assistants
+
+  // ---------- ЕДИНЫЙ выбранный месяц для всех трёх подвкладок ----------
+  // Формат всегда 'YYYY-MM'. Инициализация и переключение — ТОЛЬКО через
+  // currentMonth()/shiftMonthStr() (lib/utils): они читают/пишут местные
+  // календарные поля (getFullYear/getMonth), а не UTC через toISOString.
+  // Раньше здесь было new Date().toISOString().slice(0,7) — в часовом поясе
+  // Казахстана (UTC+5) это на несколько часов вокруг полуночи «съедало» день
+  // и сбивало месяц (см. п.8-9 ТЗ). currentMonth/shiftMonthStr уже
+  // используются в PeriodPicker.jsx без такой проблемы — переиспользуем их,
+  // а не изобретаем новую логику дат.
+  const [month, setMonth] = useState(() => currentMonth())
   const [rows, setRows] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
   const [editRate, setEditRate] = useState(null) // преподаватель для правки ставки
   const [confirm, setConfirm] = useState(null)   // 'close' | 'reopen'
   const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
+  const [q, setQ] = useState('')
+  const [onlyNoRate, setOnlyNoRate] = useState(false)
 
   const isClosed = rows?.[0]?.is_closed || false
+  const range = monthRange(month) // { from, to } — оба YYYY-MM-DD, чистая строковая арифметика
 
+  // Защита от гонки запросов (п.19 ТЗ): если пользователь быстро кликает
+  // по стрелкам, применяем только результат САМОГО ПОСЛЕДНЕГО запроса.
+  const reqId = useRef(0)
   async function load() {
+    const id = ++reqId.current
     setLoading(true); setErr('')
-    try { setRows(await fetchPayroll(month)) }
-    catch (e) { setErr(e.message); setRows([]) }
-    finally { setLoading(false) }
+    try {
+      const data = await fetchPayroll(month)
+      if (id !== reqId.current) return // пришёл устаревший ответ — игнорируем
+      setRows(data)
+    } catch (e) {
+      if (id !== reqId.current) return
+      setErr(e.message || 'Не удалось загрузить данные')
+      setRows(null)
+    } finally {
+      if (id === reqId.current) setLoading(false)
+    }
   }
   useEffect(() => { load() }, [month])
 
-  const shiftMonth = (d) => {
-    const [y, m] = month.split('-').map(Number)
-    setMonth(new Date(y, m - 1 + d, 1).toISOString().slice(0, 7))
-  }
+  const shiftMonth = (d) => setMonth(shiftMonthStr(month, d))
 
   const totals = useMemo(() => {
     const r = rows || []
@@ -50,6 +81,16 @@ export default function Payroll({ isAdmin, canEditRate }) {
       noRate: r.filter((x) => !Number(x.rate)).length,
     }
   }, [rows])
+
+  // Поиск по ФИО + фильтр «только без ставки» — работает по уже загруженным
+  // данным, мгновенно, без повторных запросов (п.30 ТЗ).
+  const visibleRows = useMemo(() => {
+    let r = rows || []
+    if (onlyNoRate) r = r.filter((x) => !Number(x.rate))
+    const s = q.trim().toLowerCase()
+    if (s) r = r.filter((x) => (x.teacher_name || '').toLowerCase().includes(s))
+    return r
+  }, [rows, q, onlyNoRate])
 
   async function doClose() {
     setBusy(true); setErr('')
@@ -65,6 +106,7 @@ export default function Payroll({ isAdmin, canEditRate }) {
   }
 
   function exportXlsx() {
+    const monthLabel = `${MONTHS[Number(month.slice(5, 7)) - 1]}_${month.slice(0, 4)}`
     const data = (rows || []).map((r, i) => ({
       '№': i + 1,
       'Преподаватель': r.teacher_name,
@@ -72,22 +114,27 @@ export default function Payroll({ isAdmin, canEditRate }) {
       'Уроков': r.lesson_units,
       'Занятий': r.sessions,
       'К выплате': Number(r.total),
+      'Статус': Number(r.rate) > 0 ? 'Ставка задана' : 'Нет ставки',
     }))
     data.push({
       '№': '', 'Преподаватель': 'ИТОГО', 'Ставка за урок': '',
-      'Уроков': totals.units, 'Занятий': totals.sessions, 'К выплате': totals.sum,
+      'Уроков': totals.units, 'Занятий': totals.sessions, 'К выплате': totals.sum, 'Статус': '',
     })
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(data)
-    ws['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 14 }, { wch: 9 }, { wch: 9 }, { wch: 14 }]
+    ws['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 14 }, { wch: 9 }, { wch: 9 }, { wch: 14 }, { wch: 14 }]
     XLSX.utils.book_append_sheet(wb, ws, 'Зарплата')
-    XLSX.writeFile(wb, `Зарплата_${MONTHS[Number(month.slice(5, 7)) - 1]}_${month.slice(0, 4)}.xlsx`)
+    XLSX.writeFile(wb, `Зарплата_${monthLabel}.xlsx`)
   }
 
   const columns = [
     { key: 'teacher_name', label: 'Преподаватель', render: (r) => <b>{r.teacher_name}</b> },
     {
       key: 'rate', label: 'Ставка/урок', num: true, width: 130,
+      // rate — numeric в Postgres, PostgREST отдаёт его строкой ("3000.00"),
+      // поэтому явно приводим к числу для сортировки (иначе "10000" встанет
+      // перед "2000" как при текстовом сравнении).
+      sortValue: (r) => Number(r.rate) || 0,
       render: (r) => (
         <span className="rowflex" style={{ gap: 6, justifyContent: 'flex-end' }}>
           {Number(r.rate) > 0
@@ -106,29 +153,48 @@ export default function Payroll({ isAdmin, canEditRate }) {
     { key: 'sessions', label: 'Занятий', num: true, width: 80 },
     {
       key: 'total', label: 'К выплате', num: true, width: 130,
+      sortValue: (r) => Number(r.total) || 0,
       render: (r) => <span style={{ color: C.brand, fontWeight: 800, fontSize: 14 }}>{money(r.total)} ₸</span>,
+    },
+    {
+      key: 'status', label: 'Статус', width: 90, sortable: false,
+      render: (r) => Number(r.rate) > 0
+        ? <span title="Ставка задана">🟢</span>
+        : <span title="Нет ставки">🔴</span>,
     },
   ]
 
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <div className="rowflex" style={{ gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4, flex: 1 }}>Зарплата</h1>
-          {/* Месяц — общий для обеих вкладок */}
+        <div className="rowflex" style={{ gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
+          <div style={{ flex: 1 }}>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Зарплата</h1>
+            <p style={{ margin: '2px 0 0', fontSize: 12.5, color: C.slate }}>Начисления сотрудников за выбранный месяц</p>
+          </div>
+          {/* Месяц — общий для всех трёх подвкладок */}
           <div className="rowflex" style={{ gap: 6 }}>
             <button onClick={() => shiftMonth(-1)} style={navBtn} title="Предыдущий месяц"><ChevronLeft size={16} /></button>
             <span style={{ fontSize: 14, fontWeight: 700, minWidth: 130, textAlign: 'center' }}>
               {MONTHS[Number(month.slice(5, 7)) - 1]} {month.slice(0, 4)}
             </span>
             <button onClick={() => shiftMonth(1)} style={navBtn} title="Следующий месяц"><ChevronRight size={16} /></button>
-            {month !== new Date().toISOString().slice(0, 7) && (
-              <button onClick={() => setMonth(new Date().toISOString().slice(0, 7))}
+            {month !== currentMonth() && (
+              <button onClick={() => setMonth(currentMonth())}
                 style={{ ...navBtn, width: 'auto', padding: '0 11px', fontSize: 12.5, fontWeight: 600 }}>
                 Текущий
               </button>
             )}
           </div>
+        </div>
+        {/* Период и статус месяца одной строкой — важно для бухгалтерии (п.24, 37 ТЗ) */}
+        <div className="rowflex" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          {range && <span style={{ fontSize: 12, color: C.faint }}>{fmtDMY(range.from)} — {fmtDMY(range.to)}</span>}
+          {rows?.length > 0 && (
+            isClosed
+              ? <span style={{ fontSize: 12, fontWeight: 700, color: '#065f46' }}>🔒 Месяц закрыт</span>
+              : <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e' }}>🔓 Месяц открыт</span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 7 }}>
           {[{ k: 'teachers', t: 'Преподаватели' }, { k: 'curators', t: 'Кураторы' }, { k: 'assistants', t: 'Ассистенты' }].map((o) => {
@@ -148,14 +214,14 @@ export default function Payroll({ isAdmin, canEditRate }) {
       {payTab === 'curators' ? (
         <Curators isAdmin={isAdmin} canEditRate={canEdit} month={month} />
       ) : payTab === 'assistants' ? (
-        <AssistantsPayroll month={month} />
+        <AssistantsPayroll month={month} range={range} monthLabel={`${MONTHS[Number(month.slice(5, 7)) - 1]}_${month.slice(0, 4)}`} />
       ) : (
       <div>
       <div className="rowflex" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1 }}>
-          <p style={{ margin: 0, fontSize: 13, color: C.slate }}>
-            Уроки × ставка. Занятие = 2 или 3 урока.
-          </p>
+        <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 200 }}>
+          <Search size={15} color={C.faint} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)' }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по ФИО…"
+            style={{ width: '100%', padding: '8px 12px 8px 32px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13, outline: 'none' }} />
         </div>
 
         {rows?.length > 0 && (
@@ -165,8 +231,6 @@ export default function Payroll({ isAdmin, canEditRate }) {
           </button>
         )}
       </div>
-
-      {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
       {/* Статус периода */}
       {isClosed ? (
@@ -192,9 +256,19 @@ export default function Payroll({ isAdmin, canEditRate }) {
       ) : null}
 
       {totals.noRate > 0 && !isClosed && (
-        <div className="rowflex" style={{ gap: 9, background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 14 }}>
+        <div className="rowflex" style={{ gap: 9, background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 14, cursor: 'pointer' }}
+          onClick={() => setOnlyNoRate((v) => !v)}>
           <AlertTriangle size={15} />
-          <span>У <b>{totals.noRate}</b> преподавателей не задана ставка — их зарплата считается как 0. Задайте ставку через карандаш в строке.</span>
+          <span>У <b>{totals.noRate}</b> преподавателей не задана ставка — их зарплата считается как 0. {onlyNoRate ? 'Показаны только они.' : 'Нажмите, чтобы показать только их.'}</span>
+        </div>
+      )}
+      {onlyNoRate && (
+        <div className="rowflex" style={{ gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: C.slate }}>Фильтр: только без ставки</span>
+          <button onClick={() => setOnlyNoRate(false)} className="rowflex"
+            style={{ gap: 4, border: 'none', background: C.grey, color: C.slate, borderRadius: 7, padding: '3px 9px', fontSize: 12, cursor: 'pointer' }}>
+            <X size={12} /> сбросить
+          </button>
         </div>
       )}
 
@@ -205,19 +279,36 @@ export default function Payroll({ isAdmin, canEditRate }) {
           <BigCard value={totals.units} label="уроков всего" />
           <BigCard value={totals.sessions} label="занятий" />
           <BigCard value={rows.length} label="преподавателей" />
+          {totals.noRate > 0 && <BigCard value={totals.noRate} label="без ставки" warn />}
         </div>
       )}
 
       {loading ? (
-        <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+        <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка начислений…</div>
+      ) : err ? (
+        <div style={{ padding: 40, textAlign: 'center', background: '#fde8e8', border: '1px solid #f5b5b5', borderRadius: 14 }}>
+          <AlertTriangle size={26} color="#c2360b" style={{ marginBottom: 8 }} />
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: '#c2360b', marginBottom: 4 }}>Не удалось загрузить данные о зарплате</div>
+          <div style={{ fontSize: 12.5, color: '#9a3412', marginBottom: 14 }}>{err}</div>
+          <button onClick={load} className="rowflex" style={{ gap: 6, margin: '0 auto', padding: '8px 16px', background: '#c2360b', color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            <RotateCw size={14} /> Повторить
+          </button>
+        </div>
       ) : !rows?.length ? (
         <div style={{ padding: 50, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
           <Wallet size={30} color={C.faint} style={{ marginBottom: 10 }} />
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>За этот месяц занятий не было</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
+            За {MONTHS[Number(month.slice(5, 7)) - 1]} {month.slice(0, 4)} года занятий нет
+          </div>
           <div style={{ fontSize: 13, color: C.slate }}>Зарплата посчитается, когда преподаватели внесут занятия.</div>
         </div>
+      ) : visibleRows.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, color: C.slate }}>
+          Ничего не найдено по заданным фильтрам.
+        </div>
       ) : (
-        <DataTable columns={columns} rows={rows.map((r) => ({ ...r, id: r.teacher_id }))} pageSize={40} />
+        <DataTable columns={columns} rows={visibleRows.map((r) => ({ ...r, id: r.teacher_id }))} pageSize={40}
+          initialSort={{ key: 'rate', dir: 'asc' }} />
       )}
 
       {editRate && (
@@ -227,11 +318,11 @@ export default function Payroll({ isAdmin, canEditRate }) {
 
       {confirm && (
         <ConfirmBox
-          title={confirm === 'close' ? 'Закрыть месяц?' : 'Открыть месяц заново?'}
+          title={confirm === 'close' ? `Закрыть ${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}?` : `Открыть ${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)} заново?`}
           text={confirm === 'close'
             ? `Суммы за ${MONTHS[Number(month.slice(5, 7)) - 1]} будут зафиксированы. Дальнейшее изменение ставок их не затронет. Это можно отменить.`
             : 'Зафиксированные суммы будут удалены, месяц снова начнёт пересчитываться по текущим ставкам.'}
-          confirmText={confirm === 'close' ? 'Закрыть' : 'Открыть'}
+          confirmText={confirm === 'close' ? 'Закрыть месяц' : 'Открыть месяц'}
           busy={busy}
           onCancel={() => setConfirm(null)}
           onConfirm={confirm === 'close' ? doClose : doReopen}
@@ -249,14 +340,14 @@ const navBtn = {
   background: '#fff', color: C.slate, cursor: 'pointer', display: 'grid', placeItems: 'center',
 }
 
-function BigCard({ value, label, main }) {
+function BigCard({ value, label, main, warn }) {
   return (
     <div style={{
-      background: main ? C.brandSoft : C.card,
-      border: `1px solid ${main ? '#c7d2fe' : C.line}`,
+      background: warn ? '#fee2e2' : main ? C.brandSoft : C.card,
+      border: `1px solid ${warn ? '#fecaca' : main ? '#c7d2fe' : C.line}`,
       borderRadius: 12, padding: '13px 18px', minWidth: 150,
     }}>
-      <div style={{ fontSize: main ? 24 : 20, fontWeight: 800, color: main ? C.brand : C.ink, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ fontSize: main ? 24 : 20, fontWeight: 800, color: warn ? '#b91c1c' : main ? C.brand : C.ink, lineHeight: 1.1 }}>{value}</div>
       <div style={{ fontSize: 11.5, color: C.slate, marginTop: 4 }}>{label}</div>
     </div>
   )
@@ -333,20 +424,31 @@ function ConfirmBox({ title, text, confirmText, busy, onCancel, onConfirm }) {
   )
 }
 
-// Зарплата ассистентов: уроки × ставка
-function AssistantsPayroll({ month }) {
+// Зарплата ассистентов: уроки × ставка. Диапазон дат берётся из range,
+// который считает родитель через monthRange(month) — та же безопасная
+// строковая логика дат, что и у преподавателей/кураторов, единый источник
+// месяца (п.14, 43-44 ТЗ). get_assistant_payroll сравнивает lesson_date
+// с ЗАКРЫТЫМ диапазоном (>= from и <= to, обе границы включительно —
+// проверено по определению RPC в 42_second_assistant.sql), поэтому here
+// намеренно сохранён закрытый интервал «первое число — последнее число
+// месяца», а не полуоткрытый — иначе в выгрузку попал бы лишний день
+// (1-е число следующего месяца).
+function AssistantsPayroll({ month, range, monthLabel }) {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState('')
   const [editing, setEditing] = useState(null) // { id, value }
 
+  const reqId = useRef(0)
   function load() {
-    const [y, m] = month.split('-').map(Number)
-    const from = `${month}-01`
-    const to = `${y}-${String(m).padStart(2, '0')}-${new Date(y, m, 0).getDate()}`
+    if (!range) return
+    const id = ++reqId.current
+    setRows(null); setErr('')
     import('../lib/api').then(({ fetchAssistantPayroll }) =>
-      fetchAssistantPayroll(from, to).then(setRows).catch((e) => setErr(e.message)))
+      fetchAssistantPayroll(range.from, range.to)
+        .then((data) => { if (id === reqId.current) setRows(data) })
+        .catch((e) => { if (id === reqId.current) setErr(e.message || 'Не удалось загрузить данные') }))
   }
-  useEffect(() => { load() }, [month])
+  useEffect(() => { load() }, [range?.from, range?.to])
 
   async function saveRate(id) {
     try {
@@ -358,9 +460,22 @@ function AssistantsPayroll({ month }) {
 
   const total = (rows || []).reduce((s, r) => s + Number(r.pay || 0), 0)
 
+  function exportXlsx() {
+    const data = (rows || []).map((r, i) => ({
+      '№': i + 1, 'Ассистент': r.full_name, 'Ставка за урок': Number(r.rate),
+      'Уроков': r.lessons_sum, 'Занятий': r.sessions, 'К оплате': Number(r.pay),
+    }))
+    data.push({ '№': '', 'Ассистент': 'ИТОГО', 'Ставка за урок': '', 'Уроков': '', 'Занятий': '', 'К оплате': total })
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(data)
+    ws['!cols'] = [{ wch: 5 }, { wch: 28 }, { wch: 14 }, { wch: 9 }, { wch: 9 }, { wch: 14 }]
+    XLSX.utils.book_append_sheet(wb, ws, 'Ассистенты')
+    XLSX.writeFile(wb, `Зарплата_ассистенты_${monthLabel}.xlsx`)
+  }
+
   const columns = [
     { key: 'full_name', label: 'Ассистент', render: (r) => <b>{r.full_name}</b> },
-    { key: 'rate', label: 'Ставка/урок', num: true, width: 150, render: (r) => (
+    { key: 'rate', label: 'Ставка/урок', num: true, width: 150, sortValue: (r) => Number(r.rate) || 0, render: (r) => (
       editing?.id === r.id ? (
         <span className="rowflex" style={{ gap: 5, justifyContent: 'flex-end' }}>
           <input type="number" value={editing.value} autoFocus
@@ -378,20 +493,35 @@ function AssistantsPayroll({ month }) {
     )},
     { key: 'lessons_sum', label: 'Уроков', num: true, width: 100, render: (r) => r.lessons_sum },
     { key: 'sessions', label: 'Занятий', num: true, width: 100, render: (r) => r.sessions },
-    { key: 'pay', label: 'К оплате', num: true, width: 140, render: (r) => <b style={{ color: C.brand }}>{money(r.pay)} ₸</b> },
+    { key: 'pay', label: 'К оплате', num: true, width: 140, sortValue: (r) => Number(r.pay) || 0, render: (r) => <b style={{ color: C.brand }}>{money(r.pay)} ₸</b> },
   ]
 
-  if (err) return <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, fontSize: 13 }}>{err}</div>
-  if (rows === null) return <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+  if (err) return (
+    <div style={{ padding: 40, textAlign: 'center', background: '#fde8e8', border: '1px solid #f5b5b5', borderRadius: 14 }}>
+      <AlertTriangle size={26} color="#c2360b" style={{ marginBottom: 8 }} />
+      <div style={{ fontSize: 14.5, fontWeight: 700, color: '#c2360b', marginBottom: 4 }}>Не удалось загрузить данные о зарплате</div>
+      <div style={{ fontSize: 12.5, color: '#9a3412', marginBottom: 14 }}>{err}</div>
+      <button onClick={load} className="rowflex" style={{ gap: 6, margin: '0 auto', padding: '8px 16px', background: '#c2360b', color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+        <RotateCw size={14} /> Повторить
+      </button>
+    </div>
+  )
+  if (rows === null) return <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка начислений…</div>
 
   return (
     <div>
-      <div className="rowflex" style={{ marginBottom: 14, gap: 12 }}>
+      <div className="rowflex" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
         <p style={{ margin: 0, fontSize: 13, color: C.slate, flex: 1 }}>Уроки × ставка. Нажмите на ставку, чтобы изменить.</p>
         <div style={{ background: C.brandSoft, border: '1px solid #c7d2fe', borderRadius: 11, padding: '9px 15px' }}>
           <span style={{ fontSize: 12, color: C.slate }}>Итого: </span>
           <b style={{ fontSize: 15, color: C.brand }}>{money(total)} ₸</b>
         </div>
+        {rows.length > 0 && (
+          <button onClick={exportXlsx} className="rowflex"
+            style={{ gap: 6, padding: '8px 14px', background: C.ok, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            <Download size={15} /> Excel
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
