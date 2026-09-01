@@ -387,7 +387,7 @@ export async function fetchTimesheetData(period) {
   // Уроки за период (только проведённые важны для табеля, но тянем все — отменённые отфильтруем)
   const lessons = await fetchAllPages(() => {
     let lq = supabase.from('lessons')
-      .select('id, group_id, teacher_id, assistant_id, assistant2_id, curator_id, lesson_date, status, lessons_count, topic')
+      .select('id, group_id, teacher_id, assistant_id, assistant2_id, curator_id, lesson_date, status, lessons_count, topic, plan_path')
       .order('id')
     if (period?.from) lq = lq.gte('lesson_date', period.from)
     if (period?.to) lq = lq.lte('lesson_date', period.to)

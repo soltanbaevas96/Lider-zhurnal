@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { GraduationCap, LogOut, Settings, FileSpreadsheet, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck, Banknote, Award } from 'lucide-react'
+import { GraduationCap, LogOut, Settings, LayoutDashboard, AlertTriangle, Users, BarChart3, Wallet, CalendarClock, ShieldCheck, Banknote, Award } from 'lucide-react'
 import { useAuth } from './lib/auth'
 import { fetchDictionaries, fetchAllDictionaries, fetchLessons } from './lib/api'
 import { C, monthOptions, currentMonth, periodRange, periodLabelOf } from './lib/utils'
@@ -10,12 +10,11 @@ import AdminCabinet from './pages/AdminCabinet'
 import OfficeManagerCabinet from './pages/OfficeManagerCabinet'
 import CuratorCabinet from './pages/CuratorCabinet'
 import Manage from './pages/Manage'
-import Timesheets from './pages/Timesheets'
 import Dashboard from './pages/Dashboard'
 import Risks from './pages/Risks'
 import StudentCard from './pages/StudentCard'
 import Analytics from './pages/Analytics'
-import Payroll from './pages/Payroll'
+import PayrollTimesheets from './pages/PayrollTimesheets'
 import PaymentsView from './pages/PaymentsView'
 import Control from './pages/Control'
 import EntBase from './pages/EntBase'
@@ -38,7 +37,7 @@ export default function App() {
   // из меню, её функциональность перенесена в Дашборд/Аналитику — см. ТЗ
   // по объединению разделов; сам файл AdminCabinet.jsx и ветка рендера
   // ниже намеренно не удалены, просто больше никуда не ведут).
-  const [view, setView] = useState('dashboard') // dashboard | analytics | risks | timesheets | manage | student
+  const [view, setView] = useState('dashboard') // dashboard | analytics | risks | payroll_timesheets | manage | student
   const [openStudent, setOpenStudent] = useState(null) // id ученика для карточки
   const [analyticsFilter, setAnalyticsFilter] = useState(null) // переход из Дашборда в Аналитику с готовым фильтром
 
@@ -168,15 +167,13 @@ export default function App() {
                 { k: 'analytics', t: 'Аналитика', icon: BarChart3 },
                 { k: 'risks', t: 'Риски', icon: AlertTriangle },
                 { k: 'entbase', t: 'База учеников', icon: Award },
-                { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
-                { k: 'payroll', t: 'Зарплата', icon: Wallet },
+                { k: 'payroll_timesheets', t: 'Табель и зарплата', icon: Wallet },
                 { k: 'payments', t: 'Оплаты', icon: Banknote },
                 { k: 'control', t: 'Контроль', icon: ShieldCheck },
                 ...(isAdmin ? [{ k: 'manage', t: 'Управление', icon: Settings }] : []),
               ] : [
                 // Бухгалтер: только финансовые разделы
-                { k: 'payroll', t: 'Зарплата', icon: Wallet },
-                { k: 'timesheets', t: 'Табели', icon: FileSpreadsheet },
+                { k: 'payroll_timesheets', t: 'Табель и зарплата', icon: Wallet },
                 { k: 'payments', t: 'Оплаты', icon: Banknote },
               ]).map((o) => {
                 const on = view === o.k
@@ -228,12 +225,10 @@ export default function App() {
           <Schedule dict={dict} isAdmin={isAdmin} />
         ) : isManager && view === 'control' ? (
           <Control dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
-        ) : canSeeFinance && view === 'payroll' ? (
-          <Payroll isAdmin={isAdmin} canEditRate={isAdmin || isAccountant} />
+        ) : canSeeFinance && view === 'payroll_timesheets' ? (
+          <PayrollTimesheets isAdmin={isAdmin} isDirector={isDirector} isAccountant={isAccountant} dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : canSeeFinance && view === 'payments' ? (
           <PaymentsView />
-        ) : canSeeFinance && view === 'timesheets' ? (
-          <Timesheets dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isAdmin && view === 'manage' ? (
           !fullDict ? (
             <Spinner label="Загрузка справочников…" />
@@ -252,7 +247,7 @@ export default function App() {
         ) : isCurator ? (
           <CuratorCabinet curator={curator} />
         ) : isAccountant ? (
-          <Payroll isAdmin={isAdmin} canEditRate={isAdmin || isAccountant} />
+          <PayrollTimesheets isAdmin={isAdmin} isDirector={isDirector} isAccountant={isAccountant} dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : teacher ? (
           <>
             <div style={{ display: 'flex', gap: 7, marginBottom: 16 }}>
