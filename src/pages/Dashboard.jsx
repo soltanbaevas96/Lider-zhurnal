@@ -1,18 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   TrendingUp, TrendingDown, Users, CalendarCheck, FileWarning, AlertTriangle,
-  Wallet, Layers, UserPlus, CalendarX, Clock, ChevronRight, Minus,
+  Wallet, Layers, CalendarX, ChevronRight, Minus, Download, RotateCw,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Cell,
 } from 'recharts'
+import * as XLSX from 'xlsx'
 import { fetchDashboard } from '../lib/api'
-import { C, periodRange, periodLabelOf, shiftRange } from '../lib/utils'
+import { C, periodRange, periodLabelOf, shiftRange, currentMonth } from '../lib/utils'
+import { pctColor } from '../lib/perfStatus'
 import PeriodPicker from '../components/PeriodPicker'
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
-const pctColor = (p) => p >= 85 ? C.ok : p >= 70 ? '#d97706' : '#dc2626'
 
 const REASON_LABELS = {
   illness: 'Болезнь', school: 'Школа', olympiad: 'Олимпиада',
@@ -22,8 +23,15 @@ const REASON_LABELS = {
 }
 const REASON_COLORS = ['#0369a1', '#0d9488', '#7c3aed', '#d97706', '#dc2626', '#6b7194']
 
-export default function Dashboard({ onOpenRisks, onOpenSection }) {
-  const [period, setPeriod] = useState({ mode: 'month', month: new Date().toISOString().slice(0, 7) })
+// Дашборд — главный экран руководителя («как сейчас дела в центре»,
+// см. ТЗ по объединению Дашборд/Сводка/Аналитика). onOpenRisks ведёт в
+// отдельную вкладку «Риски» (её сознательно не объединяем — это отдельный
+// оперативный инструмент), onOpenSection — на другие вкладки верхнего
+// уровня (Расписание), onOpenAnalytics(filter) — в Аналитику уже с
+// применённым фильтром (офис/предмет/конкретная группа/преподаватель),
+// чтобы не заставлять пользователя выбирать фильтр заново (п.44 ТЗ).
+export default function Dashboard({ onOpenRisks, onOpenSection, onOpenAnalytics }) {
+  const [period, setPeriod] = useState(() => ({ mode: 'month', month: currentMonth() }))
   const [cur, setCur] = useState(null)
   const [prev, setPrev] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -33,20 +41,40 @@ export default function Dashboard({ onOpenRisks, onOpenSection }) {
   const prevRange = useMemo(() => shiftRange(range), [range])
   const label = periodLabelOf(period)
 
-  useEffect(() => {
+  // Защита от гонки запросов при быстром переключении периода (тот же
+  // приём, что и в Зарплате/Аналитике этой сессии) — применяем только
+  // результат самого последнего запроса.
+  const reqId = useRef(0)
+  function load() {
+    const id = ++reqId.current
     setLoading(true); setErr('')
     Promise.all([
       fetchDashboard(range?.from, range?.to),
       prevRange ? fetchDashboard(prevRange.from, prevRange.to).catch(() => null) : Promise.resolve(null),
     ])
-      .then(([a, b]) => { setCur(a); setPrev(b) })
-      .catch((e) => setErr(e.message))
-      .finally(() => setLoading(false))
-  }, [range, prevRange])
+      .then(([a, b]) => { if (id === reqId.current) { setCur(a); setPrev(b) } })
+      .catch((e) => { if (id === reqId.current) setErr(e.message || 'Не удалось загрузить данные') })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
+  }
+  useEffect(() => { load() }, [range?.from, range?.to])
 
   const k = cur?.kpi
   const kp = prev?.kpi
-  const empty = !loading && (!k || k.lessons_done === 0)
+  const noLessons = !!k && k.lessons_done === 0
+
+  function exportOverview() {
+    if (!k) return
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet([{
+      Период: label,
+      'Посещаемость, %': k.attendance_pct, 'Проведено занятий': k.lessons_done, 'Проведено уроков': k.lesson_units,
+      'Активных учеников': k.students_active, 'Новых учеников': k.students_new, 'Фонд оплаты, ₸': k.payroll_sum,
+      'Учеников в зоне риска': k.students_risk, 'Занятий не проведено': k.lessons_missed,
+      'Занятий без плана': k.no_plan, 'Отменено занятий': k.lessons_cancel, 'Заполняемость групп, %': k.fill_pct,
+    }])
+    XLSX.utils.book_append_sheet(wb, ws, 'Обзор')
+    XLSX.writeFile(wb, `Дашборд_${label.replace(/\s+/g, '_')}.xlsx`)
+  }
 
   return (
     <div>
@@ -54,19 +82,27 @@ export default function Dashboard({ onOpenRisks, onOpenSection }) {
       <div className="rowflex" style={{ marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <h1 style={{ margin: 0, fontSize: 23, fontWeight: 800, letterSpacing: -0.5 }}>Обзор центра</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>{label}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Состояние центра за выбранный период · {label}</p>
         </div>
-        <PeriodPicker period={period} setPeriod={setPeriod} />
+        <div className="rowflex" style={{ gap: 10 }}>
+          <PeriodPicker period={period} setPeriod={setPeriod} />
+          {k && (
+            <button onClick={exportOverview} className="rowflex" style={{ gap: 6, padding: '9px 14px', background: C.ok, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+              <Download size={15} /> Excel
+            </button>
+          )}
+        </div>
       </div>
-
-      {err && <Banner type="error">{err}</Banner>}
 
       {loading ? (
         <div style={{ padding: 60, textAlign: 'center', color: C.slate }}>Загрузка…</div>
-      ) : empty ? (
+      ) : err ? (
+        <ErrorState text={err} onRetry={load} />
+      ) : !k ? (
         <EmptyState />
       ) : (
         <>
+          {noLessons && <Banner type="warn">За выбранный период занятий нет. Показатели ниже — нулевые; они появятся, когда преподаватели начнут проводить занятия.</Banner>}
           {/* ---------- ГЛАВНАЯ ПОЛОСА ---------- */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 12, marginBottom: 12 }}>
             <HeroCard
@@ -131,7 +167,7 @@ export default function Dashboard({ onOpenRisks, onOpenSection }) {
               n={`${k.fill_pct}%`} label="заполняемость групп"
               tone={k.fill_pct < 50 ? 'danger' : k.fill_pct < 70 ? 'warn' : 'ok'}
               icon={Layers}
-              onClick={() => onOpenSection?.('analytics')}
+              onClick={() => onOpenAnalytics?.({ mode: 'groups' })}
             />
           </div>
 
@@ -163,10 +199,10 @@ export default function Dashboard({ onOpenRisks, onOpenSection }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 12, marginBottom: 12 }}>
             {/* Офисы */}
             {cur.offices.length > 0 && (
-              <Panel title="Посещаемость по офисам">
+              <Panel title="Посещаемость по офисам" hint="клик — открыть в Аналитике">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
                   {groupOffices(cur.offices).map((o) => (
-                    <div key={o.office}>
+                    <div key={o.office} onClick={() => onOpenAnalytics?.({ mode: 'groups', office: o.office })} style={{ cursor: onOpenAnalytics ? 'pointer' : 'default' }}>
                       <div className="rowflex" style={{ gap: 8, marginBottom: 5 }}>
                         <span style={{ fontSize: 13, fontWeight: 700 }}>{o.office}</span>
                         <span style={{ fontSize: 11.5, color: C.faint }}>{o.lessons} занятий</span>
@@ -189,10 +225,11 @@ export default function Dashboard({ onOpenRisks, onOpenSection }) {
 
             {/* Предметы */}
             {cur.subjects.length > 0 && (
-              <Panel title="Посещаемость по предметам" hint="худшие сверху — там теряем учеников">
+              <Panel title="Посещаемость по предметам" hint="худшие сверху — клик открывает в Аналитике">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {cur.subjects.slice(0, 8).map((s) => (
-                    <div key={s.subject_name} className="rowflex" style={{ gap: 9 }}>
+                    <div key={s.subject_name} onClick={() => onOpenAnalytics?.({ mode: 'groups', subject: (s.subject_name || '').split(' / ')[0] })}
+                      className="rowflex" style={{ gap: 9, cursor: onOpenAnalytics ? 'pointer' : 'default' }}>
                       <span style={{ width: 96, fontSize: 12, color: C.slate, textAlign: 'right',
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {s.subject_name}
@@ -218,11 +255,12 @@ export default function Dashboard({ onOpenRisks, onOpenSection }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 12 }}>
             {/* Слабые преподаватели */}
             {cur.worstTeachers.length > 0 && (
-              <Panel title="Преподаватели с низкой посещаемостью">
+              <Panel title="Преподаватели с низкой посещаемостью" hint="клик — профиль в Аналитике">
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {cur.worstTeachers.map((t, i) => (
-                    <div key={t.teacher_id} className="rowflex"
-                      style={{ gap: 10, padding: '9px 0', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+                    <div key={t.teacher_id} onClick={() => onOpenAnalytics?.({ mode: 'personnel', openTeacherName: t.teacher_name })}
+                      className="rowflex"
+                      style={{ gap: 10, padding: '9px 0', borderTop: i ? `1px solid ${C.line}` : 'none', cursor: onOpenAnalytics ? 'pointer' : 'default' }}>
                       <span style={{ flex: 1, fontSize: 13, fontWeight: 600, minWidth: 0,
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {t.teacher_name}
@@ -251,11 +289,12 @@ export default function Dashboard({ onOpenRisks, onOpenSection }) {
 
             {/* Слабые группы */}
             {cur.weakGroups.length > 0 && (
-              <Panel title="Группы с низкой заполняемостью" hint="кандидаты на объединение">
+              <Panel title="Группы с низкой заполняемостью" hint="кандидаты на объединение — клик открывает группу">
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {cur.weakGroups.map((g, i) => (
-                    <div key={g.group_id} className="rowflex"
-                      style={{ gap: 10, padding: '9px 0', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+                    <div key={g.group_id} onClick={() => onOpenAnalytics?.({ mode: 'groups', openGroupId: g.group_id })}
+                      className="rowflex"
+                      style={{ gap: 10, padding: '9px 0', borderTop: i ? `1px solid ${C.line}` : 'none', cursor: onOpenAnalytics ? 'pointer' : 'default' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 700 }}>{g.group_name}</div>
                         <div style={{ fontSize: 11, color: C.faint }}>{g.subject_name} · {g.office}</div>
@@ -412,6 +451,19 @@ function Banner({ type, children }) {
   return (
     <div style={{ background: s.bg, border: `1px solid ${s.b}`, color: s.c, padding: '11px 14px', borderRadius: 10, marginBottom: 14, fontSize: 13 }}>
       {children}
+    </div>
+  )
+}
+
+function ErrorState({ text, onRetry }) {
+  return (
+    <div style={{ padding: 40, textAlign: 'center', background: '#fde8e8', border: '1px solid #f5b5b5', borderRadius: 14 }}>
+      <AlertTriangle size={26} color="#c2360b" style={{ marginBottom: 8 }} />
+      <div style={{ fontSize: 14.5, fontWeight: 700, color: '#c2360b', marginBottom: 4 }}>Не удалось загрузить данные</div>
+      {text && <div style={{ fontSize: 12.5, color: '#9a3412', marginBottom: 14 }}>{text}</div>}
+      <button onClick={onRetry} className="rowflex" style={{ gap: 6, margin: '0 auto', padding: '8px 16px', background: '#c2360b', color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+        <RotateCw size={14} /> Повторить
+      </button>
     </div>
   )
 }

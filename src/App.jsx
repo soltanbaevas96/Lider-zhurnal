@@ -34,8 +34,13 @@ export default function App() {
   const [period, setPeriod] = useState({ mode: 'month', month: currentMonth() }) // текущий месяц
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState('')
-  const [view, setView] = useState('cabinet') // cabinet | dashboard | risks | timesheets | manage | student
+  // Дашборд — теперь главный экран руководителя (вкладка «Сводка» убрана
+  // из меню, её функциональность перенесена в Дашборд/Аналитику — см. ТЗ
+  // по объединению разделов; сам файл AdminCabinet.jsx и ветка рендера
+  // ниже намеренно не удалены, просто больше никуда не ведут).
+  const [view, setView] = useState('dashboard') // dashboard | analytics | risks | timesheets | manage | student
   const [openStudent, setOpenStudent] = useState(null) // id ученика для карточки
+  const [analyticsFilter, setAnalyticsFilter] = useState(null) // переход из Дашборда в Аналитику с готовым фильтром
 
   const periodLabel = useMemo(() => periodLabelOf(period), [period])
 
@@ -62,11 +67,6 @@ export default function App() {
     if (!session) return
     reloadDict().catch((e) => setError(e.message))
   }, [session])
-
-  // Бухгалтер не видит вкладку «Сводка» (view по умолчанию) — открываем сразу «Зарплату»
-  useEffect(() => {
-    if (isAccountant && !isManager && view === 'cabinet') setView('payroll')
-  }, [isAccountant, isManager, view])
 
   // Загрузка уроков при смене периода
   useEffect(() => {
@@ -164,7 +164,6 @@ export default function App() {
             <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2 }}>
               {(isManager ? [
                 { k: 'dashboard', t: 'Дашборд', icon: LayoutDashboard },
-                { k: 'cabinet', t: 'Сводка', icon: GraduationCap },
                 { k: 'schedule', t: 'Расписание', icon: CalendarClock },
                 { k: 'analytics', t: 'Аналитика', icon: BarChart3 },
                 { k: 'risks', t: 'Риски', icon: AlertTriangle },
@@ -216,9 +215,11 @@ export default function App() {
         ) : openStudent ? (
           <StudentCard studentId={openStudent} onBack={() => setOpenStudent(null)} />
         ) : isManager && view === 'dashboard' ? (
-          <Dashboard onOpenRisks={() => setView('risks')} onOpenSection={(v) => setView(v)} />
+          <Dashboard onOpenRisks={() => setView('risks')} onOpenSection={(v) => setView(v)}
+            onOpenAnalytics={(filter) => { setAnalyticsFilter(filter); setView('analytics') }} />
         ) : isManager && view === 'analytics' ? (
-          <Analytics onOpenStudent={(id) => setOpenStudent(id)} />
+          <Analytics dict={dict} onOpenStudent={(id) => setOpenStudent(id)}
+            initialFilter={analyticsFilter} onFilterConsumed={() => setAnalyticsFilter(null)} />
         ) : isManager && view === 'risks' ? (
           <Risks onOpenStudent={(id) => setOpenStudent(id)} />
         ) : isManager && view === 'entbase' ? (
@@ -240,7 +241,7 @@ export default function App() {
             <Manage
               dict={fullDict}
               subjects={fullDict.subjects}
-              onBack={() => setView('cabinet')}
+              onBack={() => setView('dashboard')}
               onChanged={reloadAllDicts}
               onOpenStudent={(id) => setOpenStudent(id)}
             />
