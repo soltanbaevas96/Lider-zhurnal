@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Layers, GraduationCap, BookOpen, Download, AlertTriangle } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { fetchGroupsAnalytics, fetchTeachersAnalytics, fetchSubjectsAnalytics } from '../lib/api'
-import { C, periodRange, periodLabelOf, OFFICES } from '../lib/utils'
+import { C, periodRange, periodLabelOf, OFFICES, currentMonth } from '../lib/utils'
 import PeriodPicker from '../components/PeriodPicker'
 import DataTable from '../components/DataTable'
 
@@ -10,7 +10,7 @@ const pctColor = (p) => p >= 85 ? C.ok : p >= 65 ? '#d97706' : '#dc2626'
 
 export default function Analytics({ onOpenStudent }) {
   const [tab, setTab] = useState('groups') // groups | teachers | subjects
-  const [period, setPeriod] = useState({ mode: 'month', month: new Date().toISOString().slice(0, 7) })
+  const [period, setPeriod] = useState({ mode: 'month', month: currentMonth() })
   const [office, setOffice] = useState('')  // '' = все
   const [lang, setLang] = useState('')      // '' = все
   const [rows, setRows] = useState(null)

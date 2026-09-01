@@ -8,7 +8,7 @@ import {
   AreaChart, Area, Cell,
 } from 'recharts'
 import { fetchDashboard } from '../lib/api'
-import { C, periodRange, periodLabelOf, shiftRange } from '../lib/utils'
+import { C, periodRange, periodLabelOf, shiftRange, currentMonth } from '../lib/utils'
 import PeriodPicker from '../components/PeriodPicker'
 
 const money = (n) => Number(n || 0).toLocaleString('ru-RU')
@@ -23,7 +23,7 @@ const REASON_LABELS = {
 const REASON_COLORS = ['#0369a1', '#0d9488', '#7c3aed', '#d97706', '#dc2626', '#6b7194']
 
 export default function Dashboard({ onOpenRisks, onOpenSection }) {
-  const [period, setPeriod] = useState({ mode: 'month', month: new Date().toISOString().slice(0, 7) })
+  const [period, setPeriod] = useState({ mode: 'month', month: currentMonth() })
   const [cur, setCur] = useState(null)
   const [prev, setPrev] = useState(null)
   const [loading, setLoading] = useState(true)
