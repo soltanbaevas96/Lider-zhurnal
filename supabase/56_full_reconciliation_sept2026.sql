@@ -19,11 +19,21 @@
 --  Полный отчёт складывается в постоянную (не временную) таблицу
 --  import_report_sept2026 — так его можно пересмотреть в любой
 --  момент через Table Editor или SELECT, а не только сразу после
---  запуска во вкладке Messages. Три SELECT в конце файла показывают:
+--  запуска во вкладке Messages. SELECT-ы в конце файла показывают:
 --    1. общую сводку (создано/найдено/ошибок);
 --    2. сверку по КАЖДОЙ группе (Excel/связано/расхождение/PASS-CHECK);
 --    3. потенциальные дубликаты ФИО, уже существующие в students
---       (сами по себе, не создаются заново — только показываются).
+--       (сами по себе, не создаются заново — только показываются);
+--    4. ошибки по отдельным ученикам (если есть);
+--    5. подробная таблица ПО КАЖДОМУ зелёному ученику (ФИО/статус/
+--       школа/класс/офис/группы) — как просили в отчёте;
+--    6. та же таблица, отфильтрованная только по 10 классу;
+--    7. неоднозначные совпадения при поиске ученика — когда в базе
+--       уже больше ОДНОГО активного ученика с таким же ФИО: скрипт
+--       не размножает и не создаёт нового, а привязывает группы к
+--       одному из них, но эту строку нужно проверить вручную (могут
+--       быть два разных человека с одинаковым ФИО, и связь может
+--       уйти не туда).
 --
 --  Идемпотентность: студент — по точному нормализованному имени,
 --  группа — по (название, офис), связь — ON CONFLICT DO NOTHING.
@@ -40,10 +50,16 @@ create table if not exists import_report_sept2026 (
   student_name text,
   group_code text,
   office text,
-  status text,                       -- 'created' | 'matched' | 'existing' | 'error'
+  status text,                       -- 'created' | 'matched' | 'existing' | 'error' | 'ambiguous'
   detail text,
   green boolean
 );
+
+-- на случай, если таблица уже была создана предыдущим (более ранним) запуском
+-- этого файла без этих колонок — добавляем недостающее, ничего не теряя.
+alter table import_report_sept2026 add column if not exists student_id uuid;
+alter table import_report_sept2026 add column if not exists grade text;
+alter table import_report_sept2026 add column if not exists school text;
 
 do $$
 declare
@@ -56,6 +72,7 @@ declare
   v_group_lang text;
   v_was_new boolean;
   v_link_rows int;
+  v_match_count int;
   v_students jsonb := '[
     {"name":"Азамова Малика","school":"39","grade":"10","office":"Маргулана","lang":"рус","groups":[{"code":"10 РММГ-1","subject":"МАТ ГРАМ"},{"code":"10 РМИ-1","subject":"ИСТ КАЗ"},{"code":"10 РММ-2","subject":"МАТЕМ"},{"code":"10 РМГ-1","subject":"ГЕОГРАФИЯ"}],"student_phone":"87785740159","parent_phone":"87715605666","contract":"СН060626/003","parent_name":"Азамова Асем","note":"новый","green":1}
     ,{"name":"Ахметов Олжас","school":"14","grade":"10","office":"Маргулана","lang":"рус","groups":[{"code":"10 РММГ-1","subject":"МАТ ГРАМ"},{"code":"10 РМИ-1","subject":"ИСТ КАЗ"},{"code":"10 РММ-1","subject":"МАТЕМ"},{"code":"10 РМФ-1","subject":"ФИЗИКА"}],"student_phone":"87079000586","parent_phone":"87782632429","contract":"М100626/001","parent_name":"Ахметова Жанар","note":"новый","green":1}
@@ -801,9 +818,13 @@ begin
   loop
     begin
       -- ---------- ученик: найти или создать ----------
-      select id into v_existing_id from students
-      where archived = false and lower(trim(full_name)) = lower(trim(v_student->>'name'))
-      limit 1;
+      -- считаем СКОЛЬКО активных учеников уже совпадает по ФИО — если
+      -- больше одного, это неоднозначная ситуация (два разных человека
+      -- с одинаковым ФИО?), берём первого по id, но обязательно
+      -- отмечаем это в отчёте (см. п.7 итоговых SELECT) для ручной
+      -- проверки, вместо того чтобы молча выбрать "любого".
+      select count(*), min(id) into v_match_count, v_existing_id from students
+      where archived = false and lower(trim(full_name)) = lower(trim(v_student->>'name'));
 
       if v_existing_id is not null then
         v_new_id := v_existing_id;
@@ -820,10 +841,17 @@ begin
         v_was_new := true;
       end if;
 
-      insert into import_report_sept2026(run_at, kind, student_name, office, status, green)
+      insert into import_report_sept2026(run_at, kind, student_name, office, status, green, student_id, grade, school)
       values (v_run_at, 'student', v_student->>'name', v_student->>'office',
               case when v_was_new then 'created' else 'matched' end,
-              (v_student->>'green') = '1');
+              (v_student->>'green') = '1', v_new_id, v_student->>'grade', v_student->>'school');
+
+      if v_match_count > 1 then
+        insert into import_report_sept2026(run_at, kind, student_name, office, status, detail, green, student_id)
+        values (v_run_at, 'student', v_student->>'name', v_student->>'office', 'ambiguous',
+                format('В базе уже %s активных учеников с таким же ФИО — группы привязаны к id %s, остальные проверить вручную (см. п.3 дубликаты).', v_match_count, v_existing_id),
+                (v_student->>'green') = '1', v_existing_id);
+      end if;
 
       -- ---------- группы этого ученика: найти/создать, привязать ----------
       for v_group in select * from jsonb_array_elements(v_student->'groups')
@@ -919,3 +947,40 @@ order by how_many desc;
 select student_name, detail
 from import_report_sept2026
 where kind = 'error' and run_at = (select max(run_at) from import_report_sept2026);
+
+-- ---------- 5. ЗЕЛЁНЫЕ УЧЕНИКИ — подробный отчёт по каждому ----------
+select
+  s.student_name as "ФИО",
+  s.status as "Статус",              -- created = создан новый / matched = найден существующий
+  s.school as "Школа",
+  s.grade as "Класс",
+  s.office as "Офис",
+  s.student_id,
+  (select string_agg(l.group_code, ', ' order by l.group_code)
+     from import_report_sept2026 l
+     where l.kind = 'link' and l.run_at = s.run_at and l.student_name = s.student_name) as "Группы"
+from import_report_sept2026 s
+where s.kind = 'student' and s.green = true and s.run_at = (select max(run_at) from import_report_sept2026)
+order by s.office, s.student_name;
+
+-- ---------- 6. ТО ЖЕ, ТОЛЬКО ПО 10 КЛАССУ ----------
+select
+  s.student_name as "ФИО",
+  s.status as "Статус",
+  s.office as "Офис",
+  s.school as "Школа",
+  (select string_agg(l.group_code, ', ' order by l.group_code)
+     from import_report_sept2026 l
+     where l.kind = 'link' and l.run_at = s.run_at and l.student_name = s.student_name) as "Группы"
+from import_report_sept2026 s
+where s.kind = 'student' and s.grade = '10' and s.run_at = (select max(run_at) from import_report_sept2026)
+order by s.office, s.student_name;
+
+-- ---------- 7. НЕОДНОЗНАЧНЫЕ СОВПАДЕНИЯ ПО ФИО (нужна ручная проверка) ----------
+-- Если тут есть строки — значит в базе уже есть НЕСКОЛЬКО активных
+-- учеников с одинаковым ФИО, и группы из Excel привязались к первому
+-- из них (по id). Если это на самом деле два разных человека — нужно
+-- вручную перенести лишние student_groups на правильного ученика.
+select student_name, office, student_id as "к какому id привязали", detail
+from import_report_sept2026
+where kind = 'student' and status = 'ambiguous' and run_at = (select max(run_at) from import_report_sept2026);
