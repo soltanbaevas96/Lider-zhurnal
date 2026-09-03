@@ -228,9 +228,9 @@ export default function Analytics({ dict, onOpenStudent, initialFilter, onFilter
       const pct = v.total ? Math.round((v.present / v.total) * 100) : null
       const groupNames = [...v.groupIds].map((gid) => groupsById[gid]?.name).filter(Boolean)
       const teacherNames = [...v.teacherIds].map((tid) => nameOf(dict?.teachers || [], tid)).filter(Boolean)
-      // Предмет группы хранится как groups.subject_id (FK) — имя достаём
-      // через справочник предметов, как и везде в проекте (см. AdminCabinet).
-      const subjNames = [...v.groupIds].map((gid) => nameOf(dict?.subjects || [], groupsById[gid]?.subject_id).split(' / ')[0]).filter((n) => n && n !== '—')
+      // Предмет группы хранится прямо как groups.subject_name (текст,
+      // не FK) — отдельного справочника subject_id у групп нет.
+      const subjNames = [...v.groupIds].map((gid) => (groupsById[gid]?.subject_name || '').split(' / ')[0]).filter(Boolean)
       return {
         id: sid, full_name: student?.full_name || '—', office: student?.office || null, lang: student?.lang || null,
         groupIds: [...v.groupIds], groupNames, teacherNames, subjNames,

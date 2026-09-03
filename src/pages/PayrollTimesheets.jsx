@@ -157,7 +157,7 @@ export default function PayrollTimesheets({ isAdmin, isDirector, isAccountant, d
       const groups = groupIds.map((gid) => {
         const g = groupsById[gid]
         const own = mine.filter((l) => l.group_id === gid)
-        return { id: gid, name: g?.name || '—', subject: nameOf(dict?.subjects || [], g?.subject_id).split(' / ')[0], uroki: own.reduce((s, l) => s + lessonCount(l), 0), sessions: own.length }
+        return { id: gid, name: g?.name || '—', subject: (g?.subject_name || '').split(' / ')[0], uroki: own.reduce((s, l) => s + lessonCount(l), 0), sessions: own.length }
       }).sort((a, b) => b.uroki - a.uroki)
       const office = role === 'curators' ? null : officeOfGroups(groupIds)
 
@@ -260,7 +260,7 @@ export default function PayrollTimesheets({ isAdmin, isDirector, isAccountant, d
       const rowsOut = []
       filteredRows.forEach((r) => r.mine.forEach((l) => rowsOut.push({
         Дата: l.lesson_date, Сотрудник: r.name, Офис: r.office || '', Группа: nameOf(dict.groups, l.group_id),
-        Предмет: nameOf(dict.subjects, groupsById[l.group_id]?.subject_id).split(' / ')[0], Уроков: lessonCount(l), Статус: l.status,
+        Предмет: (groupsById[l.group_id]?.subject_name || '').split(' / ')[0], Уроков: lessonCount(l), Статус: l.status,
       })))
       addSheet(wb, 'Детализация', rowsOut)
     }
