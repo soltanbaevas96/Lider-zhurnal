@@ -709,6 +709,19 @@ function ImportWizard({ dict, onClose, onDone }) {
   const [report, setReport] = useState(null)
   const [err, setErr] = useState('')
 
+  // Статус берётся из 8-го столбца текстом — обычно это цвет ячейки в
+  // исходном Excel: бирюзовый/«тёмно-синий» → подтверждено, розовый/
+  // «бордовый» → особое (в реальном файле это оказалось строго 10 класс
+  // против 11-го — закономерность, не единичные случаи), зелёный →
+  // резерв, белый (без заливки) → занято другим центром.
+  function classifyStatus(statusRaw) {
+    const s = normName(statusRaw)
+    if (/резерв/.test(s)) return 'reserve'
+    if (/особ/.test(s)) return 'confirmed_special'
+    if (/занят/.test(s)) return 'occupied_other'
+    return 'confirmed'
+  }
+
   function parse() {
     setErr('')
     const groupsByOffice = (dict.groups || []).filter((g) => g.office === office)
@@ -720,19 +733,20 @@ function ImportWizard({ dict, onClose, onDone }) {
     const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
     const parsed = lines.map((line, i) => {
       const cols = line.split('\t').map((c) => c.trim())
-      const [office_, room, dayRaw, start, end, groupName, teacherName, statusRaw] = cols
+      const [office_, room, dayRaw, start, end, groupName, teacherName, statusRaw, notes] = cols
       const day = DAY_ALIASES[normName(dayRaw)] || Number(dayRaw) || null
-      const isOccupied = /занят/i.test(statusRaw || '') || /^[456]/.test((groupName || '').trim())
+      const status = classifyStatus(statusRaw)
+      const needsGroupTeacher = status === 'confirmed' || status === 'confirmed_special'
       let matchedGroup = null, willCreateGroup = false
-      if (!isOccupied && groupName) {
+      if (needsGroupTeacher && groupName) {
         matchedGroup = groupIndex[normName(groupName)] || null
         willCreateGroup = !matchedGroup && /^1[01]/.test(groupName.trim())
       }
-      const matchedTeacher = !isOccupied && teacherName ? (teacherIndex[normName(teacherName)] || null) : null
+      const matchedTeacher = needsGroupTeacher && teacherName ? (teacherIndex[normName(teacherName)] || null) : null
       return {
-        i, office: office_ || office, room, day, start, end, groupName, teacherName,
-        isOccupied, matchedGroup, willCreateGroup, matchedTeacher,
-        ok: isOccupied ? !!(day && start && end && room) : !!(day && start && end && room && (matchedGroup || willCreateGroup) && matchedTeacher),
+        i, office: office_ || office, room, day, start, end, groupName, teacherName, status, notes: notes || '',
+        needsGroupTeacher, matchedGroup, willCreateGroup, matchedTeacher,
+        ok: needsGroupTeacher ? !!(day && start && end && room && (matchedGroup || willCreateGroup) && matchedTeacher) : !!(day && start && end && room),
       }
     })
     setRows(parsed)
@@ -741,15 +755,15 @@ function ImportWizard({ dict, onClose, onDone }) {
 
   async function run() {
     setRunning(true); setErr('')
-    const stats = { total: rows.length, groupsFound: 0, groupsCreated: 0, teachersFound: 0, teachersNotFound: 0, confirmed: 0, occupied: 0, skipped: 0, errors: [] }
+    const stats = { total: rows.length, groupsFound: 0, groupsCreated: 0, teachersFound: 0, teachersNotFound: 0, confirmed: 0, special: 0, reserve: 0, occupied: 0, skipped: 0, errors: [] }
     try {
       for (const r of rows) {
         const teacherId = teacherOverrides[r.i] || r.matchedTeacher?.id || null
-        if (!r.isOccupied && !teacherId) { stats.teachersNotFound++; stats.skipped++; continue }
+        if (r.needsGroupTeacher && !teacherId) { stats.teachersNotFound++; stats.skipped++; continue }
         if (!r.day || !r.start || !r.end || !r.room) { stats.skipped++; continue }
 
         let groupId = r.matchedGroup?.id || null
-        if (!r.isOccupied) {
+        if (r.needsGroupTeacher) {
           if (groupId) stats.groupsFound++
           else if (r.willCreateGroup) {
             const created = await addGroup({ name: r.groupName.trim(), office: r.office, lang: guessLang(r.groupName), archived: false })
@@ -761,12 +775,15 @@ function ImportWizard({ dict, onClose, onDone }) {
 
         try {
           await saveScheduleSlot(null, {
-            office: r.office, room: r.room, groupId: r.isOccupied ? null : groupId, teacherId: r.isOccupied ? null : teacherId,
+            office: r.office, room: r.room, groupId: r.needsGroupTeacher ? groupId : null, teacherId: r.needsGroupTeacher ? teacherId : null,
             assistantId: null, weekday: r.day, startTime: r.start, endTime: r.end, lessonsCount: 2,
-            status: r.isOccupied ? 'occupied_other' : 'confirmed', activeFrom: todayStr(), activeTo: null, notes: null,
+            status: r.status, activeFrom: todayStr(), activeTo: null, notes: r.notes || null,
           })
-          if (r.isOccupied) stats.occupied++; else stats.confirmed++
-        } catch (e) { stats.errors.push(`${r.groupName || 'занято'} (${r.room}, день ${r.day}): ${e.message}`) }
+          if (r.status === 'confirmed') stats.confirmed++
+          else if (r.status === 'confirmed_special') stats.special++
+          else if (r.status === 'reserve') stats.reserve++
+          else stats.occupied++
+        } catch (e) { stats.errors.push(`${r.groupName || STATUS_META[r.status].label} (${r.room}, день ${r.day}): ${e.message}`) }
       }
       setReport(stats)
       await onDone()
@@ -789,6 +806,8 @@ function ImportWizard({ dict, onClose, onDone }) {
               Групп найдено в базе: <b>{report.groupsFound}</b> · Создано новых: <b>{report.groupsCreated}</b><br />
               Преподавателей сопоставлено: <b>{report.teachersFound}</b> · Не сопоставлено: <b style={{ color: report.teachersNotFound ? '#dc2626' : undefined }}>{report.teachersNotFound}</b><br />
               Подтверждённых слотов создано: <b>{report.confirmed}</b><br />
+              Подтверждённых (особых) создано: <b>{report.special}</b><br />
+              Резервов создано: <b>{report.reserve}</b><br />
               «Занято — другой центр» создано: <b>{report.occupied}</b><br />
               Пропущено (не хватило данных): <b>{report.skipped}</b><br />
               Ошибок при сохранении: <b style={{ color: report.errors.length ? '#dc2626' : undefined }}>{report.errors.length}</b>
@@ -802,14 +821,15 @@ function ImportWizard({ dict, onClose, onDone }) {
           <div>
             <p style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>Проверьте сопоставление перед импортом. Строки с ⚠️ не будут импортированы, пока преподаватель не выбран вручную.</p>
             <div className="dt-wrap" style={{ maxHeight: 360, overflow: 'auto' }}><div className="dt-scroll"><table className="dt">
-              <thead><tr><th style={{ width: 40 }}>#</th><th style={{ width: 60 }}>Каб.</th><th style={{ width: 60 }}>День</th><th style={{ width: 100 }}>Время</th><th>Группа</th><th>Преподаватель</th><th style={{ width: 70 }}>Статус</th></tr></thead>
+              <thead><tr><th style={{ width: 40 }}>#</th><th style={{ width: 60 }}>Каб.</th><th style={{ width: 60 }}>День</th><th style={{ width: 100 }}>Время</th><th style={{ width: 110 }}>Тип</th><th>Группа</th><th>Преподаватель</th><th style={{ width: 50 }}>OK</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.i}>
                     <td>{r.i + 1}</td><td>{r.room || '—'}</td><td>{r.day ? WD.find((w) => w.n === r.day)?.s : <span style={{ color: '#dc2626' }}>?</span>}</td>
                     <td>{r.start && r.end ? `${r.start}–${r.end}` : <span style={{ color: '#dc2626' }}>?</span>}</td>
-                    <td>{r.isOccupied ? <i style={{ color: C.faint }}>занято (другой центр)</i> : r.matchedGroup ? r.groupName : r.willCreateGroup ? <span style={{ color: '#d97706' }}>🆕 {r.groupName}</span> : <span style={{ color: '#dc2626' }}>⚠️ {r.groupName || '—'}</span>}</td>
-                    <td>{r.isOccupied ? '—' : r.matchedTeacher ? r.teacherName : (
+                    <td><span style={{ fontSize: 11, fontWeight: 700, color: STATUS_META[r.status].color }}>{STATUS_META[r.status].label}</span></td>
+                    <td>{!r.needsGroupTeacher ? <i style={{ color: C.faint }}>{r.notes || '—'}</i> : r.matchedGroup ? r.groupName : r.willCreateGroup ? <span style={{ color: '#d97706' }}>🆕 {r.groupName}</span> : <span style={{ color: '#dc2626' }}>⚠️ {r.groupName || '—'}</span>}</td>
+                    <td>{!r.needsGroupTeacher ? '—' : r.matchedTeacher ? r.teacherName : (
                       <select value={teacherOverrides[r.i] || ''} onChange={(e) => setTeacherOverrides((p) => ({ ...p, [r.i]: e.target.value }))} style={{ ...selSty, padding: '4px 8px' }}>
                         <option value="">⚠️ {r.teacherName || 'выбрать…'}</option>
                         {(dict.teachers || []).map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
@@ -834,7 +854,7 @@ function ImportWizard({ dict, onClose, onDone }) {
             </select>
             <Label style={{ marginTop: 14 }}>Вставьте строки (по одной на занятие, столбцы через Tab — как при копировании из Excel)</Label>
             <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}>
-              Офис · Кабинет · День (Пн/Вт/…) · Начало (ЧЧ:ММ) · Конец · Группа · Преподаватель · [Статус — «занято», если другой центр]
+              Офис · Кабинет · День (Пн/Вт/…) · Начало (ЧЧ:ММ) · Конец · Группа · Преподаватель · Статус (пусто = подтверждено, «особое», «резерв», «занято») · [Заметка]
             </p>
             <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={10}
               placeholder={'Торайгырова\t7\tПн\t14:00\t16:00\t11 КТФ-2\tГульжихан К.\n...'}
