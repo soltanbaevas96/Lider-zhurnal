@@ -642,20 +642,43 @@ export async function updateTeacherRate(teacherId, rate) {
 }
 
 // ---------- РАСПИСАНИЕ ----------
-export async function fetchScheduleGrid() {
-  const { data, error } = await supabase.rpc('get_schedule_grid')
+// p_office необязателен — без него отдаёт все офисы разом (для режимов
+// «По группам»/«По преподавателям», где нужен полный список).
+export async function fetchScheduleSlots(office) {
+  const { data, error } = await supabase.rpc('get_schedule_slots', { p_office: office || null })
   if (error) throw error
   return data || []
 }
 
-export async function addSchedule(row) {
-  const { error } = await supabase.from('schedule').insert(row)
+// Живая проверка конфликтов (кабинет/преподаватель) — до сохранения,
+// чтобы форма могла показать предупреждение сразу, не дожидаясь отказа
+// от save_schedule_slot. slot: { office, room, teacherId, weekday,
+// startTime, endTime, activeFrom, activeTo, excludeId }
+export async function checkScheduleConflicts(slot) {
+  const { data, error } = await supabase.rpc('check_schedule_conflicts', {
+    p_office: slot.office, p_room: slot.room, p_teacher_id: slot.teacherId || null,
+    p_weekday: slot.weekday, p_start: slot.startTime, p_end: slot.endTime,
+    p_active_from: slot.activeFrom || null, p_active_to: slot.activeTo || null,
+    p_exclude_id: slot.excludeId || null,
+  })
   if (error) throw error
+  return data || []
 }
 
-export async function updateSchedule(id, patch) {
-  const { error } = await supabase.from('schedule').update(patch).eq('id', id)
+// Создать (id=null) или изменить (id задан) слот расписания. Проверка
+// конфликтов и прав — на сервере (save_schedule_slot), см. 53_schedule_rebuild.sql.
+// slot: { office, room, groupId, teacherId, assistantId, weekday, startTime,
+// endTime, lessonsCount, status, activeFrom, activeTo, notes }
+export async function saveScheduleSlot(id, slot) {
+  const { data, error } = await supabase.rpc('save_schedule_slot', {
+    p_id: id || null, p_office: slot.office, p_room: slot.room,
+    p_group_id: slot.groupId || null, p_teacher_id: slot.teacherId || null, p_assistant_id: slot.assistantId || null,
+    p_weekday: slot.weekday, p_start_time: slot.startTime, p_end_time: slot.endTime,
+    p_lessons_count: slot.lessonsCount || null, p_status: slot.status,
+    p_active_from: slot.activeFrom || null, p_active_to: slot.activeTo || null, p_notes: slot.notes || null,
+  })
   if (error) throw error
+  return data
 }
 
 export async function deleteSchedule(id) {

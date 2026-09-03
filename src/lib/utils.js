@@ -123,6 +123,28 @@ export function shiftRange(r) {
   return { from: pFrom.toISOString().slice(0, 10), to: pTo.toISOString().slice(0, 10) }
 }
 
+// Сегодняшняя дата 'YYYY-MM-DD' в МЕСТНОМ календаре — через локальные
+// геттеры (getFullYear/getMonth/getDate), а не toISOString() (который
+// уводит в UTC и может сместить дату/день недели в первые часы суток
+// по времени Казахстана). Используется расписанием для навигации по неделям.
+export function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+// dateStr ('YYYY-MM-DD') + n дней -> новая дата, тоже локально и безопасно
+// (new Date(y,m,d) сам корректно переносит через конец месяца/года).
+export function addDaysStr(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d + n)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+// Понедельник той недели, в которую попадает dateStr
+export function mondayOf(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dow = (new Date(y, m - 1, d).getDay() + 6) % 7 // 0=пн..6=вс
+  return addDaysStr(dateStr, -dow)
+}
+
 // ---------- ПАЛИТРА ----------
 export const C = {
   ink: '#14183a', slate: '#6b7194', faint: '#9aa0c0', line: '#e8e9f3',
