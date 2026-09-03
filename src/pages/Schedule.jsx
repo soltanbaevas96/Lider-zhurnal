@@ -781,24 +781,32 @@ function ImportWizard({ dict, onClose, onDone }) {
   async function run() {
     setRunning(true); setErr('')
     const stats = { total: rows.length, groupsFound: 0, groupsCreated: 0, teachersFound: 0, teachersNotFound: 0, confirmed: 0, special: 0, reserve: 0, occupied: 0, skipped: 0, errors: [] }
+    // Одна и та же новая группа встречается в расписании много раз (разные
+    // дни недели) — создаём её только один раз за весь импорт, дальше
+    // переиспользуем id из этого кеша, а не зовём addGroup() повторно
+    // (иначе вторая же строка с той же группой падала на unique-constraint).
+    const createdGroups = {}
     try {
       for (const r of rows) {
-        const teacherId = teacherOverrides[r.i] || r.matchedTeacher?.id || null
-        if (r.needsGroupTeacher && !teacherId) { stats.teachersNotFound++; stats.skipped++; continue }
-        if (!r.day || !r.start || !r.end || !r.room) { stats.skipped++; continue }
-
-        let groupId = r.matchedGroup?.id || null
-        if (r.needsGroupTeacher) {
-          if (groupId) stats.groupsFound++
-          else if (r.willCreateGroup) {
-            const created = await addGroup({ name: r.groupName.trim(), office: r.office, lang: guessLang(r.groupName), archived: false })
-            groupId = created.id
-            stats.groupsCreated++
-          } else { stats.skipped++; continue }
-          stats.teachersFound++
-        }
-
         try {
+          const teacherId = teacherOverrides[r.i] || r.matchedTeacher?.id || null
+          if (r.needsGroupTeacher && !teacherId) { stats.teachersNotFound++; stats.skipped++; continue }
+          if (!r.day || !r.start || !r.end || !r.room) { stats.skipped++; continue }
+
+          let groupId = r.matchedGroup?.id || null
+          if (r.needsGroupTeacher) {
+            const key = normName(r.groupName)
+            if (groupId) stats.groupsFound++
+            else if (createdGroups[key]) { groupId = createdGroups[key] }
+            else if (r.willCreateGroup) {
+              const created = await addGroup({ name: r.groupName.trim(), office: r.office, lang: guessLang(r.groupName), archived: false })
+              groupId = created.id
+              createdGroups[key] = groupId
+              stats.groupsCreated++
+            } else { stats.skipped++; continue }
+            stats.teachersFound++
+          }
+
           await saveScheduleSlot(null, {
             office: r.office, room: r.room, groupId: r.needsGroupTeacher ? groupId : null, teacherId: r.needsGroupTeacher ? teacherId : null,
             assistantId: null, weekday: r.day, startTime: r.start, endTime: r.end, lessonsCount: 2,
@@ -808,7 +816,12 @@ function ImportWizard({ dict, onClose, onDone }) {
           else if (r.status === 'confirmed_special') stats.special++
           else if (r.status === 'reserve') stats.reserve++
           else stats.occupied++
-        } catch (e) { stats.errors.push(`${r.groupName || STATUS_META[r.status].label} (${r.room}, день ${r.day}): ${e.message}`) }
+        } catch (e) {
+          // Ошибка на ОДНОЙ строке (например неожиданный конфликт расписания
+          // или дубль имени группы) не должна обрывать весь импорт — остальные
+          // строки продолжают обрабатываться, а эта попадает в отчёт.
+          stats.errors.push(`${r.groupName || STATUS_META[r.status].label} (каб. ${r.room}, ${WD.find((w) => w.n === r.day)?.t || r.day}, ${r.start}–${r.end}): ${e.message}`)
+        }
       }
       setReport(stats)
       await onDone()
