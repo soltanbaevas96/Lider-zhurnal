@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import {
-  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search, Trash2, Wallet, Building2,
+  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search, Trash2, Wallet, Building2, Upload, AlertTriangle,
 } from 'lucide-react'
 import DataTable from '../components/DataTable'
 import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, officeOf, langOf, OFFICES } from '../lib/utils'
@@ -565,6 +565,7 @@ function StudentsManage({ groups, onOpenStudent }) {
   const [students, setStudents] = useState(null)
   const [modal, setModal] = useState(null) // { row } | 'new'
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [importOpen, setImportOpen] = useState(false)
   const [q, setQ] = useState('')
   const [office, setOffice] = useState('Маргулана')
   const [lang, setLang] = useState('каз')
@@ -662,6 +663,10 @@ function StudentsManage({ groups, onOpenStudent }) {
           <Search size={15} color={C.slate} style={{ position: 'absolute', left: 11, top: 9 }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика…" />
         </div>
+        <button onClick={() => setImportOpen(true)} className="rowflex"
+          style={{ gap: 6, padding: '8px 15px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <Upload size={15} /> Импорт
+        </button>
         <button onClick={() => setModal('new')} className="rowflex"
           style={{ gap: 6, padding: '8px 15px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
           <Plus size={16} /> Добавить
@@ -700,8 +705,174 @@ function StudentsManage({ groups, onOpenStudent }) {
           }}
         />
       )}
+
+      {importOpen && (
+        <StudentImportWizard groups={groups} onClose={() => setImportOpen(false)}
+          onDone={async () => { setImportOpen(false); await reload() }} />
+      )}
     </>
   )
+}
+
+// ---------- МАССОВЫЙ ИМПОРТ УЧЕНИКОВ ----------
+// Вставка строк (как при копировании из Excel): ФИО, Школа, Класс, Офис,
+// Язык, Группы (через ;), Тел. ученика, Тел. родителя, Договор, ФИ
+// родителя, Примечание. Дубликаты проверяются через ту же
+// findStudentsByName, что и обычная форма добавления (точное имя,
+// без учёта регистра) — совпавший ученик не создаётся заново, только
+// довязывается к недостающим группам. Группы должны уже существовать —
+// импорт учеников их не создаёт (в отличие от групп при импорте
+// расписания, тут это осознанно строже: разночтение в названии группы
+// должно решаться вручную, а не тихой автосозданием дубля группы).
+function normStudentName(s) { return (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ') }
+
+function StudentImportWizard({ groups, onClose, onDone }) {
+  const [raw, setRaw] = useState('')
+  const [rows, setRows] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [report, setReport] = useState(null)
+  const [err, setErr] = useState('')
+
+  async function parse() {
+    setErr(''); setChecking(true)
+    const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
+    try {
+      const parsed = await Promise.all(lines.map(async (line, i) => {
+        const cols = line.split('\t').map((c) => c.trim())
+        const [fullName, school, grade, office, lang, groupsRaw, studentPhone, parentPhone, contract, parentName, note] = cols
+        const groupCodes = (groupsRaw || '').split(';').map((g) => g.trim()).filter((g) => /^\d{1,2}\s/.test(g))
+        const otherText = (groupsRaw || '').split(';').map((g) => g.trim()).filter((g) => g && !/^\d{1,2}\s/.test(g))
+        const matchedGroups = []
+        const unmatchedGroups = []
+        groupCodes.forEach((code) => {
+          const g = groups.find((gr) => normStudentName(gr.name) === normStudentName(code) && gr.office === office)
+          if (g) matchedGroups.push(g); else unmatchedGroups.push(code)
+        })
+        let dup = []
+        if (fullName) { try { dup = await findStudentsByName(fullName) } catch { dup = [] } }
+        return {
+          i, fullName, school, grade, office, lang, studentPhone, parentPhone, contract, parentName, note,
+          matchedGroups, unmatchedGroups, otherText, isDuplicate: dup.length > 0, dupInfo: dup[0] || null,
+          ok: !!fullName && !!office,
+        }
+      }))
+      setRows(parsed)
+    } catch (e) { setErr(e.message) } finally { setChecking(false) }
+  }
+
+  async function run() {
+    setRunning(true); setErr('')
+    const stats = { total: rows.length, created: 0, skippedDuplicate: 0, groupsLinked: 0, groupsUnmatched: 0, errors: [] }
+    try {
+      for (const r of rows) {
+        if (!r.ok) continue
+        try {
+          if (r.isDuplicate) {
+            // Уже есть в базе (скорее всего «перезаключение») — не создаём
+            // повторно, только довязываем недостающие группы.
+            stats.skippedDuplicate++
+            for (const g of r.matchedGroups) {
+              await addStudentToGroup(r.dupInfo.id, g.id)
+              stats.groupsLinked++
+            }
+          } else {
+            await addStudent({
+              full_name: r.fullName, school: r.school, grade: r.grade, office: r.office, lang: r.lang,
+              phone: r.studentPhone || null, parent_phone: r.parentPhone || null, parent_name: r.parentName || null,
+              contract_no: r.contract || null, note: r.note || null,
+            }, r.matchedGroups.map((g) => g.id))
+            stats.created++
+            stats.groupsLinked += r.matchedGroups.length
+          }
+          stats.groupsUnmatched += r.unmatchedGroups.length
+        } catch (e) { stats.errors.push(`${r.fullName}: ${e.message}`) }
+      }
+      setReport(stats)
+      await onDone()
+    } catch (e) { setErr(e.message) } finally { setRunning(false) }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 80 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 820, padding: 22, maxHeight: '90vh', overflow: 'auto' }}>
+        <div className="rowflex" style={{ marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Импорт учеников</h3>
+          <button onClick={onClose} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: C.slate, cursor: 'pointer' }}><X size={20} /></button>
+        </div>
+
+        {report ? (
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>Импорт завершён</div>
+            <div style={{ background: C.grey, borderRadius: 10, padding: 14, fontSize: 13, lineHeight: 1.9 }}>
+              Строк обработано: <b>{report.total}</b><br />
+              Создано новых учеников: <b>{report.created}</b><br />
+              Пропущено как дубликат (уже есть в базе): <b>{report.skippedDuplicate}</b><br />
+              Связей с группами добавлено: <b>{report.groupsLinked}</b><br />
+              Кодов групп не найдено в базе: <b style={{ color: report.groupsUnmatched ? '#d97706' : undefined }}>{report.groupsUnmatched}</b><br />
+              Ошибок: <b style={{ color: report.errors.length ? '#dc2626' : undefined }}>{report.errors.length}</b>
+            </div>
+            {report.errors.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: 12.5, color: '#dc2626' }}>{report.errors.map((e, i) => <div key={i}>• {e}</div>)}</div>
+            )}
+            <button onClick={onClose} style={{ marginTop: 16, width: '100%', padding: 11, borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Готово</button>
+          </div>
+        ) : rows ? (
+          <div>
+            <p style={{ fontSize: 12.5, color: C.slate, marginBottom: 10 }}>
+              Проверьте перед импортом. 🆕 — будет создан новый ученик. 👤 — уже есть в базе (только довяжем группы, повторно не создаём).
+              Коды групп, которых нет в базе для этого офиса, не привяжутся — их нужно проверить отдельно.
+            </p>
+            <div className="dt-wrap" style={{ maxHeight: 400, overflow: 'auto' }}><div className="dt-scroll"><table className="dt">
+              <thead><tr><th style={{ width: 40 }}>#</th><th>Ученик</th><th style={{ width: 100 }}>Офис</th><th style={{ width: 60 }}>Класс</th><th>Группы</th><th style={{ width: 60 }}>OK</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.i}>
+                    <td>{r.i + 1}</td>
+                    <td>{r.isDuplicate ? <span title="Уже есть в базе">👤</span> : <span title="Новый">🆕</span>} {r.fullName || <span style={{ color: '#dc2626' }}>— нет имени —</span>}</td>
+                    <td>{r.office || <span style={{ color: '#dc2626' }}>?</span>}</td>
+                    <td>{r.grade}</td>
+                    <td style={{ fontSize: 12 }}>
+                      {r.matchedGroups.map((g) => g.name).join(', ')}
+                      {r.unmatchedGroups.length > 0 && (
+                        <span style={{ color: '#d97706' }}> {r.matchedGroups.length ? '· ' : ''}⚠️ не найдено: {r.unmatchedGroups.join(', ')}</span>
+                      )}
+                      {r.otherText.length > 0 && (
+                        <span style={{ color: C.faint }}> {(r.matchedGroups.length || r.unmatchedGroups.length) ? '· ' : ''}(в файле: {r.otherText.join(', ')})</span>
+                      )}
+                    </td>
+                    <td>{r.ok ? <Check size={14} color="#0f9d58" /> : <AlertTriangle size={14} color="#dc2626" />}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div></div>
+            {err && <div style={{ color: '#c2360b', fontSize: 13, marginTop: 10 }}>{err}</div>}
+            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+              <button onClick={() => setRows(null)} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Назад</button>
+              <button onClick={run} disabled={running} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', opacity: running ? 0.6 : 1 }}>{running ? 'Импортирую…' : 'Импортировать'}</button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <Label>Вставьте строки (столбцы через Tab — как при копировании из Excel)</Label>
+            <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}>
+              ФИО · Школа · Класс · Офис (точное название) · Язык · Группы через «;» · Тел. ученика · Тел. родителя · Договор · ФИ родителя · Примечание
+            </p>
+            <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={12}
+              placeholder={'Азамова Малика\t39\t10\tМаргулана\tрус\t10 РММГ-1;10 РМИ-1;10 РММ-2\t87785740159\t87715605666\tСН060626/003\tАзамова Асем\tновый\n...'}
+              style={{ ...inp, width: '100%', fontFamily: 'monospace', fontSize: 12.5, resize: 'vertical' }} />
+            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+              <button onClick={onClose} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Отмена</button>
+              <button onClick={parse} disabled={!raw.trim() || checking} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', opacity: (raw.trim() && !checking) ? 1 : 0.5 }}>{checking ? 'Проверяю…' : 'Проверить сопоставление'}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+function Label({ children, style }) {
+  return <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 6, ...style }}>{children}</div>
 }
 
 // ---------- УЧЁТКИ БЕЗ КАРТОЧКИ (офис-менеджеры, бухгалтер) ----------
