@@ -700,6 +700,32 @@ function guessLang(groupName) {
   return null
 }
 
+// Расписание почти всегда пишет преподавателя как «Имя И.» (имя + первая
+// буква фамилии/отчества), а в базе — полное ФИО, поэтому точное сравнение
+// строк почти никогда не совпадает. Ищем по имени + начальной букве второго
+// слова, независимо от порядка «Имя Фамилия» / «Фамилия Имя» в базе.
+// Автоматически подставляем совпадение, ТОЛЬКО если оно единственное —
+// при неоднозначности (два тёзки с одинаковой буквой) оставляем на ручной
+// выбор, чтобы не назначить занятие не тому человеку (п.5 ТЗ).
+function matchTeacherFuzzy(scheduleName, teachers) {
+  const exactWanted = normName(scheduleName)
+  const exact = teachers.find((t) => normName(t.full_name) === exactWanted)
+  if (exact) return exact
+
+  const m = /^([a-zа-яёіңғүұқөhәA-Z]+)\s+([a-zа-яёA-Z])\.?\s*$/u.exec((scheduleName || '').trim())
+  if (!m) return null
+  const firstName = m[1].toLowerCase()
+  const initial = m[2].toLowerCase()
+
+  const candidates = teachers.filter((t) => {
+    const words = normName(t.full_name).split(' ').filter(Boolean)
+    const hasFirst = words.includes(firstName)
+    const hasInitialWord = words.some((w) => w !== firstName && w[0] === initial)
+    return hasFirst && hasInitialWord
+  })
+  return candidates.length === 1 ? candidates[0] : null
+}
+
 function ImportWizard({ dict, onClose, onDone }) {
   const [office, setOffice] = useState(OFFICES[0])
   const [raw, setRaw] = useState('')
@@ -727,8 +753,7 @@ function ImportWizard({ dict, onClose, onDone }) {
     const groupsByOffice = (dict.groups || []).filter((g) => g.office === office)
     const groupIndex = {}
     groupsByOffice.forEach((g) => { groupIndex[normName(g.name)] = g })
-    const teacherIndex = {}
-    ;(dict.teachers || []).forEach((t) => { teacherIndex[normName(t.full_name)] = t })
+    const teachers = dict.teachers || []
 
     const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
     const parsed = lines.map((line, i) => {
@@ -742,7 +767,7 @@ function ImportWizard({ dict, onClose, onDone }) {
         matchedGroup = groupIndex[normName(groupName)] || null
         willCreateGroup = !matchedGroup && /^1[01]/.test(groupName.trim())
       }
-      const matchedTeacher = needsGroupTeacher && teacherName ? (teacherIndex[normName(teacherName)] || null) : null
+      const matchedTeacher = needsGroupTeacher && teacherName ? matchTeacherFuzzy(teacherName, teachers) : null
       return {
         i, office: office_ || office, room, day, start, end, groupName, teacherName, status, notes: notes || '',
         needsGroupTeacher, matchedGroup, willCreateGroup, matchedTeacher,
