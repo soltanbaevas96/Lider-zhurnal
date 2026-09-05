@@ -54,8 +54,12 @@ begin
   loop
     begin
       -- ---------- ученик: найти или создать (по нормализованному ФИО) ----------
-      select count(*), min(id) into v_match_count, v_existing_id from students
+      select count(*) into v_match_count from students
       where archived = false and lower(trim(full_name)) = lower(trim(v_student->>'name'));
+
+      select id into v_existing_id from students
+      where archived = false and lower(trim(full_name)) = lower(trim(v_student->>'name'))
+      order by id limit 1;
 
       if v_existing_id is not null then
         v_new_id := v_existing_id;
