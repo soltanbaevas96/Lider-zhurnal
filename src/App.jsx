@@ -144,7 +144,7 @@ export default function App() {
                 {isDirector ? 'Кабинет директора' : isAdmin ? 'Кабинет завуча'
                   : isSeniorOM ? 'Старший офис-менеджер' : isOfficeManager ? `Офис-менеджер · ${managerOffice || ''}`
                   : isAccountant ? 'Бухгалтер'
-                  : isMethodist ? `Методист · ${managerOffice || ''}`
+                  : isMethodist ? 'Методист · все офисы'
                   : profile?.role === 'assistant' ? 'Ассистент' : 'Кабинет преподавателя'}
               </div>
             </div>
@@ -282,13 +282,7 @@ export default function App() {
             onOpenStudent={(id) => setOpenStudent(id)}
           />
         ) : isMethodist ? (
-          !managerOffice ? (
-            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center', color: C.slate }}>
-              Вашей учётке методиста не назначен офис. Обратитесь к завучу.
-            </div>
-          ) : (
-            <MethodistCabinet office={managerOffice} dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
-          )
+          <MethodistCabinet dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : profile?.role === 'assistant' ? (
           <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center' }}>
             <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8 }}>

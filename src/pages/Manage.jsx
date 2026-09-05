@@ -893,7 +893,8 @@ const ROLE_LABEL = {
   methodist: 'методист',
 }
 // Роли, у которых есть привязка к офису (нужен select «Офис» в форме).
-const ROLES_WITH_OFFICE = ['office_manager', 'methodist']
+// Методист офисом не ограничен — видит и редактирует все офисы разом.
+const ROLES_WITH_OFFICE = ['office_manager']
 
 function AccountsManage({ roles, roleOptions, withStatus }) {
   const [rows, setRows] = useState(null)

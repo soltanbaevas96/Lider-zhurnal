@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
-  Users, Layers, CalendarClock, LayoutDashboard, Search, Plus, X, Check, AlertTriangle, UserMinus,
+  Users, Layers, CalendarClock, LayoutDashboard, Search, Plus, X, Check, AlertTriangle, UserMinus, Building2,
 } from 'lucide-react'
 import {
   fetchStudentsWithGroups, fetchAllGroups, createGroup, updateGroup,
@@ -20,8 +20,14 @@ const gradeOfGroup = (name) => (String(name || '').match(/^(\d{1,2})/) || [])[1]
 
 const WD_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
-export default function MethodistCabinet({ office, dict, onOpenStudent }) {
+// Методист по решению владельца видит и редактирует ВСЕ офисы разом —
+// фильтр «Офис» ниже это просто удобный переключатель контекста
+// (какие данные показывать/куда по умолчанию создавать новое), а не
+// ограничение доступа: доступ ко всем офисам уже разрешён на уровне
+// RLS (миграция 62), «Все офисы» тут всегда доступны.
+export default function MethodistCabinet({ dict, onOpenStudent }) {
   const [tab, setTab] = useState('overview')
+  const [officeFilter, setOfficeFilter] = useState('all')
   const [students, setStudents] = useState(null)
   const [groups, setGroups] = useState(null)
   const [slots, setSlots] = useState(null)
@@ -32,15 +38,21 @@ export default function MethodistCabinet({ office, dict, onOpenStudent }) {
       const [st, gr, sl] = await Promise.all([
         fetchStudentsWithGroups(),
         fetchAllGroups(),
-        fetchScheduleSlots(office).catch(() => []),
+        fetchScheduleSlots(officeFilter === 'all' ? undefined : officeFilter).catch(() => []),
       ])
       setStudents(st); setGroups(gr); setSlots(sl)
     } catch (e) { setErr(e.message) }
   }
-  useEffect(() => { reload() }, [office])
+  useEffect(() => { reload() }, [officeFilter])
 
-  const officeStudents = useMemo(() => (students || []).filter((s) => s.office === office), [students, office])
-  const officeGroups = useMemo(() => (groups || []).filter((g) => g.office === office), [groups, office])
+  const officeStudents = useMemo(
+    () => (students || []).filter((s) => officeFilter === 'all' || s.office === officeFilter),
+    [students, officeFilter]
+  )
+  const officeGroups = useMemo(
+    () => (groups || []).filter((g) => officeFilter === 'all' || g.office === officeFilter),
+    [groups, officeFilter]
+  )
 
   const tabs = [
     { k: 'overview', t: 'Обзор', icon: LayoutDashboard },
@@ -53,7 +65,20 @@ export default function MethodistCabinet({ office, dict, onOpenStudent }) {
     <div>
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Методист</h1>
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: C.slate }}>{office}</p>
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: C.slate }}>Все офисы центра</p>
+        <div className="rowflex" style={{ gap: 7, flexWrap: 'wrap', marginBottom: 10 }}>
+          {['all', ...OFFICES].map((o) => {
+            const on = officeFilter === o
+            return (
+              <button key={o} onClick={() => setOfficeFilter(o)} className="rowflex"
+                style={{ gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                  border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+                  background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate }}>
+                <Building2 size={13} /> {o === 'all' ? 'Все офисы' : o}
+              </button>
+            )
+          })}
+        </div>
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
           {tabs.map((o) => {
             const on = tab === o.k
@@ -73,15 +98,15 @@ export default function MethodistCabinet({ office, dict, onOpenStudent }) {
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 11, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
       {students === null ? <Spinner /> : tab === 'overview' ? (
-        <OverviewTab office={office} students={officeStudents} groups={officeGroups} slots={slots || []}
+        <OverviewTab students={officeStudents} groups={officeGroups} slots={slots || []}
           onOpenTab={setTab} />
       ) : tab === 'students' ? (
-        <StudentsTab office={office} students={officeStudents} groups={officeGroups}
+        <StudentsTab officeFilter={officeFilter} students={officeStudents} groups={officeGroups}
           onOpenStudent={onOpenStudent} onChanged={reload} />
       ) : tab === 'groups' ? (
-        <GroupsTab office={office} groups={officeGroups} students={officeStudents} onChanged={reload} />
+        <GroupsTab officeFilter={officeFilter} groups={officeGroups} students={officeStudents} onChanged={reload} />
       ) : (
-        <Schedule dict={dict} isAdmin={false} canEdit lockedOffice={office} />
+        <Schedule dict={dict} isAdmin={false} canEdit lockedOffice={officeFilter === 'all' ? null : officeFilter} />
       )}
     </div>
   )
@@ -192,7 +217,7 @@ function QuickBtn({ onClick, icon: Icon, text }) {
 }
 
 // ==================== УЧЕНИКИ ====================
-function StudentsTab({ office, students, groups, onOpenStudent, onChanged }) {
+function StudentsTab({ officeFilter, students, groups, onOpenStudent, onChanged }) {
   const [q, setQ] = useState('')
   const [langFilter, setLangFilter] = useState('all')
   const [gradeFilter, setGradeFilter] = useState('all')
@@ -224,6 +249,7 @@ function StudentsTab({ office, students, groups, onOpenStudent, onChanged }) {
     { key: 'school', label: 'Школа', width: 90, render: (s) => s.school || '—' },
     { key: 'grade', label: 'Класс', width: 60, render: (s) => s.grade || '—' },
     { key: 'lang', label: 'Язык', width: 70, render: (s) => s.lang || '—' },
+    ...(officeFilter === 'all' ? [{ key: 'office', label: 'Офис', width: 110, render: (s) => s.office || '—' }] : []),
     { key: 'groups', label: 'Группы', render: (s) => s.groupsData?.length
       ? s.groupsData.map((g) => g.name).join(', ')
       : <span style={{ color: '#c2410c', fontWeight: 600 }}>без группы</span> },
@@ -267,7 +293,8 @@ function StudentsTab({ office, students, groups, onOpenStudent, onChanged }) {
 
       {modal && (
         <MethodistStudentModal
-          office={office} groups={groups} row={modal === 'new' ? null : modal.row}
+          defaultOffice={officeFilter !== 'all' ? officeFilter : OFFICES[0]}
+          groups={groups} row={modal === 'new' ? null : modal.row}
           onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged() }}
         />
       )}
@@ -277,11 +304,12 @@ function StudentsTab({ office, students, groups, onOpenStudent, onChanged }) {
 
 // Карточка ученика методиста: организационные поля + управление группами
 // с проверкой соответствия класс/офис/язык (п.12-15 ТЗ методиста).
-function MethodistStudentModal({ office, groups, row, onClose, onDone }) {
+function MethodistStudentModal({ defaultOffice, groups, row, onClose, onDone }) {
   const isNew = !row
   const [name, setName] = useState(row?.full_name || '')
   const [school, setSchool] = useState(row?.school || '')
   const [grade, setGrade] = useState(row?.grade || '')
+  const [office, setOffice] = useState(row?.office || defaultOffice || OFFICES[0])
   const [lang, setLang] = useState(row?.lang || 'каз')
   const [phone, setPhone] = useState(row?.phone || '')
   const [parentPhone, setParentPhone] = useState(row?.parent_phone || '')
@@ -311,6 +339,7 @@ function MethodistStudentModal({ office, groups, row, onClose, onDone }) {
     const gg = gradeOfGroup(g.name)
     if (grade && gg && String(grade).trim() !== gg) reasons.push(`класс группы ${gg}, у ученика ${grade}`)
     if (lang && g.lang && lang !== g.lang) reasons.push(`язык группы «${g.lang}», у ученика «${lang}»`)
+    if (office && g.office && office !== g.office) reasons.push(`офис группы «${g.office}», у ученика «${office}»`)
     return reasons
   }
 
@@ -365,7 +394,11 @@ function MethodistStudentModal({ office, groups, row, onClose, onDone }) {
           <div style={{ width: 90 }}><Field label="Класс"><input value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="10" style={inp} /></Field></div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <Field label="Офис"><div style={{ ...inp, background: C.grey }}>{office}</div></Field>
+          <Field label="Офис">
+            <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
+              {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </Field>
           <Field label="Язык">
             <select value={lang} onChange={(e) => setLang(e.target.value)} style={inp}>
               <option value="каз">Казахский</option>
@@ -431,7 +464,7 @@ function MethodistStudentModal({ office, groups, row, onClose, onDone }) {
 }
 
 // ==================== ГРУППЫ ====================
-function GroupsTab({ office, groups, students, onChanged }) {
+function GroupsTab({ officeFilter, groups, students, onChanged }) {
   const [q, setQ] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
   const [langFilter, setLangFilter] = useState('all')
@@ -450,6 +483,7 @@ function GroupsTab({ office, groups, students, onChanged }) {
 
   const columns = [
     { key: 'name', label: 'Группа', render: (g) => <b onClick={(e) => { e.stopPropagation(); setRosterOf(g) }} style={{ cursor: 'pointer', color: C.brand }}>{g.name}</b> },
+    ...(officeFilter === 'all' ? [{ key: 'office', label: 'Офис', width: 110, render: (g) => g.office || '—' }] : []),
     { key: 'grade', label: 'Класс', width: 60, render: (g) => gradeOfGroup(g.name) || '—' },
     { key: 'subject_name', label: 'Предмет', render: (g) => (g.subject_name || '—').split(' / ')[0] },
     { key: 'lang', label: 'Язык', width: 80, render: (g) => g.lang || '—' },
@@ -488,7 +522,7 @@ function GroupsTab({ office, groups, students, onChanged }) {
       <DataTable columns={columns} rows={filtered} pageSize={40} />
 
       {modal && (
-        <MethodistGroupModal office={office} row={modal === 'new' ? null : modal.row}
+        <MethodistGroupModal defaultOffice={officeFilter !== 'all' ? officeFilter : OFFICES[0]} row={modal === 'new' ? null : modal.row}
           onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged() }} />
       )}
       {rosterOf && (
@@ -499,9 +533,10 @@ function GroupsTab({ office, groups, students, onChanged }) {
   )
 }
 
-function MethodistGroupModal({ office, row, onClose, onDone }) {
+function MethodistGroupModal({ defaultOffice, row, onClose, onDone }) {
   const [name, setName] = useState(row?.name || '')
   const [subject, setSubject] = useState(row?.subject_name || '')
+  const [office, setOffice] = useState(row?.office || defaultOffice || OFFICES[0])
   const [lang, setLang] = useState(row?.lang || 'каз')
   const [capacity, setCapacity] = useState(String(row?.capacity || 13))
   const [busy, setBusy] = useState(false)
@@ -535,6 +570,11 @@ function MethodistGroupModal({ office, row, onClose, onDone }) {
         <Field label="Название (код группы)"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="напр. 10 КМБ-1" style={inp} autoFocus /></Field>
         <Field label="Предмет"><input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="напр. Математика" style={inp} /></Field>
         <div style={{ display: 'flex', gap: 10 }}>
+          <Field label="Офис">
+            <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
+              {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </Field>
           <Field label="Язык">
             <select value={lang} onChange={(e) => setLang(e.target.value)} style={inp}>
               <option value="каз">Казахский</option>
@@ -543,7 +583,6 @@ function MethodistGroupModal({ office, row, onClose, onDone }) {
           </Field>
           <div style={{ width: 110 }}><Field label="Вместимость"><input type="number" value={capacity} onChange={(e) => setCapacity(e.target.value)} style={inp} /></Field></div>
         </div>
-        <div style={{ fontSize: 12, color: C.slate, marginBottom: 4 }}>Офис: <b>{office}</b></div>
         <p style={{ fontSize: 11, color: C.faint, marginTop: 2 }}>
           Преподавателя и кабинет назначают во вкладке «Расписание» — там, где создаётся сам слот занятий.
         </p>
@@ -563,7 +602,9 @@ function GroupRosterModal({ group, allStudents, onClose, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const inGroup = allStudents.filter((s) => (s.groupIds || []).includes(group.id))
-  const notInGroup = allStudents.filter((s) => !(s.groupIds || []).includes(group.id))
+  // предлагаем добавить только учеников ТОГО ЖЕ офиса, что и группа —
+  // иначе при просмотре «Все офисы» тут перемешались бы все ученики центра.
+  const notInGroup = allStudents.filter((s) => !(s.groupIds || []).includes(group.id) && s.office === group.office)
     .filter((s) => {
       const t = q.toLowerCase().trim()
       return !t || (s.full_name || '').toLowerCase().includes(t)
