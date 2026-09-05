@@ -14,6 +14,13 @@ import {
   fetchProfilesByRole, adminUpdateProfileName, fetchAccountsByRole, setAccountActive,
 } from '../lib/api'
 
+// Класс группы — берём из настоящего поля groups.grade; регэксп по
+// имени оставлен ТОЛЬКО как запасной вариант для старых групп, у
+// которых grade почему-то ещё не проставлен (см. миграцию 63).
+function gradeOfGroupName(name) {
+  return (String(name || '').match(/^(10|11)/) || [])[1] || null
+}
+
 export default function Manage({ dict, subjects, onBack, onChanged, onOpenStudent }) {
   const [tab, setTab] = useState('teachers')
   const [showArchived, setShowArchived] = useState(false)
@@ -27,6 +34,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
   const [confirmDelete, setConfirmDelete] = useState(null) // строка для подтверждения удаления
   const [gOffice, setGOffice] = useState('Маргулана') // фильтр групп: офис
   const [gLang, setGLang] = useState('каз') // фильтр групп: язык
+  const [gGrade, setGGrade] = useState('all') // фильтр групп: класс (all | 10 | 11)
   const [gQuery, setGQuery] = useState('') // поиск по группам
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -51,6 +59,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
   // Группы дополнительно фильтруем по офису и языку (из note) + поиск
   if (tab === 'groups') {
     rows = rows.filter((r) => officeOf(r.note) === gOffice && langOf(r.note) === gLang)
+    if (gGrade !== 'all') rows = rows.filter((r) => (r.grade || gradeOfGroupName(r.name)) === gGrade)
     const gq = (gQuery || '').toLowerCase().trim()
     if (gq) rows = rows.filter((r) => (r.name || '').toLowerCase().includes(gq) || (r.note || '').toLowerCase().includes(gq))
   }
@@ -61,6 +70,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       if (modal.row) {
         const patch = tab === 'groups'
           ? { name: form.name, subject_name: form.subject_name || null, office: form.g_office || null, lang: form.g_lang || null,
+              grade: form.grade || null,
               capacity: Number(form.capacity) || 13, note: `${form.subject_name || ''} · ${form.g_office || ''} · ${form.g_lang || ''}` }
           : tab === 'subjects'
             ? { name: form.name }
@@ -80,6 +90,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
         else await addGroup({
           name: form.name, subject_name: form.subject_name || null,
           office: form.g_office || 'Маргулана', lang: form.g_lang || 'каз',
+          grade: form.grade || null,
           capacity: Number(form.capacity) || 13,
           note: `${form.subject_name || ''} · ${form.g_office || 'Маргулана'} · ${form.g_lang || 'каз'}`,
         })
@@ -175,7 +186,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
       <>
       {tab === 'groups' && (
         <>
-          <OfficeLangTabs office={gOffice} lang={gLang} setOffice={setGOffice} setLang={setGLang} count={rows.length} />
+          <OfficeLangTabs office={gOffice} lang={gLang} setOffice={setGOffice} setLang={setGLang} count={rows.length} grade={gGrade} setGrade={setGGrade} />
           <div className="search-box" style={{ marginBottom: 12, maxWidth: 360 }}>
             <Search size={15} color={C.slate} style={{ position: 'absolute', left: 11, top: 9 }} />
             <input value={gQuery} onChange={(e) => setGQuery(e.target.value)} placeholder="Поиск группы по коду…" />
@@ -415,6 +426,7 @@ function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
     subject_name: row?.subject_name || '',
     g_office: row?.office || 'Маргулана',
     g_lang: row?.lang || 'каз',
+    grade: row?.grade || '',
     capacity: row?.capacity || '13',
   })
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }))
@@ -451,7 +463,18 @@ function EditModal({ tab, subjects, row, busy, onClose, onSave }) {
                   </select>
                 </Field>
               </div>
-              <div style={{ width: 110 }}>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="Класс">
+                  <select value={form.grade || ''} onChange={(e) => set('grade', e.target.value)} style={inp}>
+                    <option value="">— не указан —</option>
+                    <option value="10">10 класс</option>
+                    <option value="11">11 класс</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ width: 130 }}>
                 <Field label="Вместимость"><input type="number" value={form.capacity || '13'} onChange={(e) => set('capacity', e.target.value)} style={inp} /></Field>
               </div>
             </div>
@@ -576,6 +599,7 @@ function StudentsManage({ groups, onOpenStudent }) {
   const [q, setQ] = useState('')
   const [office, setOffice] = useState('Маргулана')
   const [lang, setLang] = useState('каз')
+  const [grade, setGrade] = useState('all')
   const [err, setErr] = useState('')
 
   async function reload() {
@@ -590,7 +614,10 @@ function StudentsManage({ groups, onOpenStudent }) {
     // офис/язык берём из колонок напрямую; если пусто — из contact (старые данные)
     const sOffice = s.office || officeOf(s.contact)
     const sLang = s.lang || langOf(s.contact)
-    if (!searching && (sOffice !== office || sLang !== lang)) return false
+    if (!searching) {
+      if (sOffice !== office || sLang !== lang) return false
+      if (grade !== 'all' && String(s.grade || '') !== grade) return false
+    }
     const t = q.toLowerCase().trim()
     return !t || s.full_name.toLowerCase().includes(t)
   })
@@ -632,6 +659,7 @@ function StudentsManage({ groups, onOpenStudent }) {
         return <span style={{ color: C.slate }}>{sOffice || '—'}{sLang ? ` · ${sLang}` : ''}</span>
       },
     }] : []),
+    { key: 'grade', label: 'Класс', width: 70, render: (s) => s.grade ? `${s.grade} класс` : <span style={{ color: C.faint }}>—</span> },
     {
       key: 'groups', label: 'Группы', sortable: false,
       sortValue: (s) => s.groupIds.length,
@@ -663,7 +691,7 @@ function StudentsManage({ groups, onOpenStudent }) {
   return (
     <>
       <div style={{ opacity: searching ? 0.4 : 1, pointerEvents: searching ? 'none' : 'auto' }}>
-        <OfficeLangTabs office={office} lang={lang} setOffice={setOffice} setLang={setLang} count={filtered.length} />
+        <OfficeLangTabs office={office} lang={lang} setOffice={setOffice} setLang={setLang} count={filtered.length} grade={grade} setGrade={setGrade} />
       </div>
       <div className="fbar">
         <div className="search-box">
@@ -1261,10 +1289,21 @@ export function StudentModal({ groups, row, onClose, onDone, fixedOffice }) {
           <div style={{ flex: 1 }}>
             <Field label="Школа"><input value={school} onChange={(e) => setSchool(e.target.value)} placeholder="№ или название" style={inp} /></Field>
           </div>
-          <div style={{ width: 90 }}>
-            <Field label="Класс"><input value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="11" style={inp} /></Field>
+          <div style={{ width: 130 }}>
+            <Field label="Класс">
+              <select value={grade} onChange={(e) => setGrade(e.target.value)} style={inp}>
+                <option value="">— не указан —</option>
+                <option value="10">10 класс</option>
+                <option value="11">11 класс</option>
+              </select>
+            </Field>
           </div>
         </div>
+        {row && row.grade && grade && grade !== row.grade && (groupIds || []).length > 0 && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, marginBottom: 14 }}>
+            Изменение класса может повлиять на соответствие ученика его текущим группам ({(groupIds || []).length}) — проверьте их вручную после сохранения.
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}>
@@ -1603,8 +1642,9 @@ function GroupStudentsModal({ group, onClose }) {
 }
 
 // ---------- ДВУХУРОВНЕВЫЕ ВКЛАДКИ: ОФИС → ЯЗЫК ----------
-function OfficeLangTabs({ office, lang, setOffice, setLang, count }) {
+function OfficeLangTabs({ office, lang, setOffice, setLang, count, grade, setGrade }) {
   const langs = [{ k: 'каз', t: 'Казахские' }, { k: 'рус', t: 'Русские' }]
+  const grades = [{ k: 'all', t: 'Все классы' }, { k: '10', t: '10 класс' }, { k: '11', t: '11 класс' }]
   return (
     <div style={{ marginBottom: 14 }}>
       {/* Офисы */}
@@ -1636,6 +1676,21 @@ function OfficeLangTabs({ office, lang, setOffice, setLang, count }) {
             )
           })}
         </div>
+        {setGrade && (
+          <div style={{ display: 'flex', background: C.grey, borderRadius: 10, padding: 3 }}>
+            {grades.map((g) => {
+              const a = (grade || 'all') === g.k
+              return (
+                <button key={g.k} onClick={() => setGrade(g.k)}
+                  style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
+                    background: a ? C.card : 'transparent', color: a ? C.brand : C.slate,
+                    boxShadow: a ? '0 1px 4px rgba(20,24,58,.1)' : 'none' }}>
+                  {g.t}
+                </button>
+              )
+            })}
+          </div>
+        )}
         <span style={{ fontSize: 12.5, color: C.faint }}>найдено: {count}</span>
       </div>
     </div>

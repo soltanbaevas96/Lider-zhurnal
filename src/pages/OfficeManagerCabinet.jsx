@@ -78,6 +78,7 @@ function StudentsTab({ homeOffice, onOpenStudent }) {
   // по умолчанию свой офис, но ученик мог перейти/ходить в другой —
   // поэтому доступен переключатель на все офисы
   const [officeFilter, setOfficeFilter] = useState(homeOffice || 'all')
+  const [gradeFilter, setGradeFilter] = useState('all')
 
   async function reload() {
     try {
@@ -89,6 +90,7 @@ function StudentsTab({ homeOffice, onOpenStudent }) {
 
   const filtered = (students || []).filter((s) => {
     if (officeFilter !== 'all' && s.office !== officeFilter) return false
+    if (gradeFilter !== 'all' && String(s.grade || '') !== gradeFilter) return false
     const t = q.toLowerCase().trim()
     if (!t) return true
     return (s.full_name || '').toLowerCase().includes(t)
@@ -118,6 +120,7 @@ function StudentsTab({ homeOffice, onOpenStudent }) {
   return (
     <div>
       <OfficeFilterChips value={officeFilter} onChange={setOfficeFilter} />
+      <GradeFilterChips value={gradeFilter} onChange={setGradeFilter} />
       <div className="rowflex" style={{ gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
           <Search size={17} color={C.faint} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
@@ -152,6 +155,7 @@ function GroupsTab({ homeOffice }) {
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
   const [officeFilter, setOfficeFilter] = useState(homeOffice || 'all')
+  const [gradeFilter, setGradeFilter] = useState('all')
 
   async function reload() {
     try { setGroups(await fetchAllGroups()) } catch (e) { setErr(e.message) }
@@ -160,6 +164,7 @@ function GroupsTab({ homeOffice }) {
 
   const filtered = (groups || []).filter((g) => {
     if (officeFilter !== 'all' && g.office !== officeFilter) return false
+    if (gradeFilter !== 'all' && String(g.grade || '') !== gradeFilter) return false
     const t = q.toLowerCase().trim()
     return !t || (g.name || '').toLowerCase().includes(t) || (g.subject_name || '').toLowerCase().includes(t)
   })
@@ -169,6 +174,7 @@ function GroupsTab({ homeOffice }) {
     ...(officeFilter === 'all' ? [{ key: 'office', label: 'Офис', width: 110, render: (g) => g.office || '—' }] : []),
     { key: 'subject_name', label: 'Предмет', render: (g) => (g.subject_name || '—').split(' / ')[0] },
     { key: 'lang', label: 'Язык', width: 80, render: (g) => g.lang || '—' },
+    { key: 'grade', label: 'Класс', width: 80, render: (g) => g.grade ? `${g.grade} класс` : '—' },
     { key: 'capacity', label: 'Вместимость', width: 110, num: true, render: (g) => g.capacity || 12 },
     { key: 'edit', label: '', width: 44, sortable: false, render: (g) => (
       <button onClick={(e) => { e.stopPropagation(); setModal({ row: g }) }}
@@ -179,6 +185,7 @@ function GroupsTab({ homeOffice }) {
   return (
     <div>
       <OfficeFilterChips value={officeFilter} onChange={setOfficeFilter} />
+      <GradeFilterChips value={gradeFilter} onChange={setGradeFilter} />
       <div className="rowflex" style={{ gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
           <Search size={17} color={C.faint} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
@@ -206,6 +213,25 @@ function GroupsTab({ homeOffice }) {
   )
 }
 
+function GradeFilterChips({ value, onChange }) {
+  const grades = [{ k: 'all', t: 'Все классы' }, { k: '10', t: '10 класс' }, { k: '11', t: '11 класс' }]
+  return (
+    <div style={{ display: 'flex', gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
+      {grades.map((g) => {
+        const on = value === g.k
+        return (
+          <button key={g.k} onClick={() => onChange(g.k)}
+            style={{ padding: '7px 14px', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`,
+              background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate }}>
+            {g.t}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function OfficeFilterChips({ value, onChange }) {
   return (
     <div style={{ display: 'flex', gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -228,6 +254,7 @@ function GroupModal({ row, office, onClose, onDone }) {
   const [name, setName] = useState(row?.name || '')
   const [subject, setSubject] = useState(row?.subject_name || '')
   const [lang, setLang] = useState(row?.lang || 'каз')
+  const [grade, setGrade] = useState(row?.grade || '')
   const [capacity, setCapacity] = useState(String(row?.capacity || 12))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -238,7 +265,7 @@ function GroupModal({ row, office, onClose, onDone }) {
     try {
       const fields = {
         name: name.trim(), subject_name: subject.trim() || null,
-        office, lang, capacity: Number(capacity) || 12,
+        office, lang, grade: grade || null, capacity: Number(capacity) || 12,
         note: `${subject.trim()} · ${office} · ${lang}`,
       }
       if (row) await updateGroup(row.id, fields)
@@ -257,6 +284,15 @@ function GroupModal({ row, office, onClose, onDone }) {
             <select value={lang} onChange={(e) => setLang(e.target.value)} style={inp}>
               <option value="каз">Казахский</option>
               <option value="рус">Русский</option>
+            </select>
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Класс">
+            <select value={grade} onChange={(e) => setGrade(e.target.value)} style={inp}>
+              <option value="">— не указан —</option>
+              <option value="10">10 класс</option>
+              <option value="11">11 класс</option>
             </select>
           </Field>
         </div>

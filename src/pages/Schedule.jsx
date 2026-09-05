@@ -45,6 +45,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
   const [mode, setMode] = useState('week') // week | groups | teachers
   const [office, setOffice] = useState(lockedOffice || '')
   const [room, setRoom] = useState('')
+  const [grade, setGrade] = useState('')
   const [q, setQ] = useState('')
   const [refDate, setRefDate] = useState(() => todayStr())
 
@@ -80,6 +81,10 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
     return [...new Set(slots.filter((s) => !office || s.office === office).map((s) => s.room))].sort()
   }, [slots, office])
 
+  // Класс слота — у самого schedule такого поля нет, берём из его группы
+  // (groups.grade, миграция 63). Без группы (резерв/занято) — класс не определён.
+  const gradeOfSlot = (r) => (dict.groups || []).find((g) => g.id === r.group_id)?.grade || null
+
   // Слот считается видимым в выбранной неделе, если период его действия
   // (active_from/active_to) пересекается с [weekStart, weekEnd] — половина
   // расписания могла смениться в середине месяца (п.21-22 ТЗ), это и есть
@@ -90,12 +95,13 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
     return slots.filter((r) => {
       if (office && r.office !== office) return false
       if (room && r.room !== room) return false
+      if (grade && gradeOfSlot(r) !== grade) return false
       if (r.active_from > weekEnd) return false
       if (r.active_to && r.active_to < weekStart) return false
       if (!s) return true
       return (r.group_name || '').toLowerCase().includes(s) || (r.teacher_name || '').toLowerCase().includes(s) || (r.room || '').toLowerCase().includes(s)
     })
-  }, [slots, office, room, q, weekStart, weekEnd])
+  }, [slots, office, room, grade, q, weekStart, weekEnd, dict.groups])
 
   const byDay = useMemo(() => {
     const m = {}
@@ -260,6 +266,11 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
             {roomOptions.map((r) => <option key={r} value={r}>Кабинет {r}</option>)}
           </select>
         )}
+        <select value={grade} onChange={(e) => setGrade(e.target.value)} style={selSty}>
+          <option value="">Все классы</option>
+          <option value="10">10 класс</option>
+          <option value="11">11 класс</option>
+        </select>
         <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 200 }}>
           <Search size={15} color={C.faint} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)' }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск группы / преподавателя / кабинета…"
@@ -297,7 +308,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
                     {items.length === 0 ? (
                       <div style={{ fontSize: 12, color: C.faint, textAlign: 'center' }}>нет занятий</div>
                     ) : items.map((r) => (
-                      <SlotCard key={r.id} r={r} isAdmin={canEditSlots} draggable={canEditSlots}
+                      <SlotCard key={r.id} r={r} grade={gradeOfSlot(r)} isAdmin={canEditSlots} draggable={canEditSlots}
                         onDragStart={() => setDragId(r.id)}
                         onClick={() => setEditSlot(r)} />
                     ))}
@@ -339,7 +350,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
 }
 
 // ================= КАРТОЧКА ЗАНЯТИЯ =================
-function SlotCard({ r, isAdmin, draggable, onDragStart, onClick }) {
+function SlotCard({ r, grade, isAdmin, draggable, onDragStart, onClick }) {
   const m = STATUS_META[r.status] || STATUS_META.confirmed
   const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
   return (
@@ -348,7 +359,9 @@ function SlotCard({ r, isAdmin, draggable, onDragStart, onClick }) {
       <div style={{ fontSize: 11.5, fontWeight: 700, color: m.color }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)} · каб. {r.room}</div>
       {isReal ? (
         <>
-          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, marginTop: 2 }}>{r.group_name}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, marginTop: 2 }}>
+            {grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade} кл · </span>}{r.group_name}
+          </div>
           <div style={{ fontSize: 11.5, color: C.slate }}>{r.teacher_name || '—'}</div>
         </>
       ) : (

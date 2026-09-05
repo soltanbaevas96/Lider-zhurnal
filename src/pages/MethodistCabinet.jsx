@@ -12,11 +12,10 @@ import { Stat, Field, inp, Spinner } from '../components/ui'
 import DataTable from '../components/DataTable'
 import Schedule from './Schedule'
 
-// Класс группы читаем из её же кода (все коды центра начинаются с номера
-// класса — "10 КМБ-1", "11РМФ-2" и т.д.) — отдельного поля grade у groups
-// нет, и заводить его не нужно (п.24 общего ТЗ про офисы — не плодить
-// архитектуру там, где хватает существующих данных).
-const gradeOfGroup = (name) => (String(name || '').match(/^(\d{1,2})/) || [])[1] || null
+// Класс группы — прежде всего настоящее поле groups.grade (миграция
+// 63). Разбор названия оставлен ТОЛЬКО как запасной вариант — для
+// старых/необычных групп, у которых grade вдруг ещё не проставлен.
+const gradeOfGroup = (g) => (g && g.grade) || (String(g?.name || '').match(/^(10|11)/) || [])[1] || null
 
 const WD_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
@@ -118,8 +117,8 @@ function OverviewTab({ office, students, groups, slots, onOpenTab }) {
   const today = todayStr()
   const todaySlots = slots.filter((s) => s.weekday === todayWd && s.active_from <= today && (!s.active_to || s.active_to >= today) && (s.status === 'confirmed' || s.status === 'confirmed_special'))
   const withoutGroup = students.filter((s) => !s.groupsData || s.groupsData.length === 0)
-  const grade10 = groups.filter((g) => gradeOfGroup(g.name) === '10').length
-  const grade11 = groups.filter((g) => gradeOfGroup(g.name) === '11').length
+  const grade10 = groups.filter((g) => gradeOfGroup(g) === '10').length
+  const grade11 = groups.filter((g) => gradeOfGroup(g) === '11').length
   const kaz = groups.filter((g) => g.lang === 'каз').length
   const rus = groups.filter((g) => g.lang === 'рус').length
   const overfilled = groups.filter((g) => (g.studentsCount ?? countIn(students, g.id)) > (g.capacity || 13))
@@ -336,7 +335,7 @@ function MethodistStudentModal({ defaultOffice, groups, row, onClose, onDone }) 
 
   function mismatchOf(g) {
     const reasons = []
-    const gg = gradeOfGroup(g.name)
+    const gg = gradeOfGroup(g)
     if (grade && gg && String(grade).trim() !== gg) reasons.push(`класс группы ${gg}, у ученика ${grade}`)
     if (lang && g.lang && lang !== g.lang) reasons.push(`язык группы «${g.lang}», у ученика «${lang}»`)
     if (office && g.office && office !== g.office) reasons.push(`офис группы «${g.office}», у ученика «${office}»`)
@@ -473,9 +472,9 @@ function GroupsTab({ officeFilter, groups, students, onChanged }) {
 
   const countIn = (groupId) => students.filter((s) => (s.groupIds || []).includes(groupId)).length
 
-  const grades = [...new Set(groups.map((g) => gradeOfGroup(g.name)).filter(Boolean))].sort()
+  const grades = [...new Set(groups.map((g) => gradeOfGroup(g)).filter(Boolean))].sort()
   const filtered = groups.filter((g) => {
-    if (gradeFilter !== 'all' && gradeOfGroup(g.name) !== gradeFilter) return false
+    if (gradeFilter !== 'all' && gradeOfGroup(g) !== gradeFilter) return false
     if (langFilter !== 'all' && g.lang !== langFilter) return false
     const t = q.toLowerCase().trim()
     return !t || (g.name || '').toLowerCase().includes(t) || (g.subject_name || '').toLowerCase().includes(t)
@@ -484,7 +483,7 @@ function GroupsTab({ officeFilter, groups, students, onChanged }) {
   const columns = [
     { key: 'name', label: 'Группа', render: (g) => <b onClick={(e) => { e.stopPropagation(); setRosterOf(g) }} style={{ cursor: 'pointer', color: C.brand }}>{g.name}</b> },
     ...(officeFilter === 'all' ? [{ key: 'office', label: 'Офис', width: 110, render: (g) => g.office || '—' }] : []),
-    { key: 'grade', label: 'Класс', width: 60, render: (g) => gradeOfGroup(g.name) || '—' },
+    { key: 'grade', label: 'Класс', width: 60, render: (g) => gradeOfGroup(g) || '—' },
     { key: 'subject_name', label: 'Предмет', render: (g) => (g.subject_name || '—').split(' / ')[0] },
     { key: 'lang', label: 'Язык', width: 80, render: (g) => g.lang || '—' },
     { key: 'fill', label: 'Ученики', width: 110, render: (g) => {
@@ -538,6 +537,7 @@ function MethodistGroupModal({ defaultOffice, row, onClose, onDone }) {
   const [subject, setSubject] = useState(row?.subject_name || '')
   const [office, setOffice] = useState(row?.office || defaultOffice || OFFICES[0])
   const [lang, setLang] = useState(row?.lang || 'каз')
+  const [grade, setGrade] = useState(row?.grade || '')
   const [capacity, setCapacity] = useState(String(row?.capacity || 13))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -547,7 +547,7 @@ function MethodistGroupModal({ defaultOffice, row, onClose, onDone }) {
     setBusy(true); setErr('')
     try {
       const fields = {
-        name: name.trim(), subject_name: subject.trim() || null, office, lang, capacity: Number(capacity) || 13,
+        name: name.trim(), subject_name: subject.trim() || null, office, lang, grade: grade || null, capacity: Number(capacity) || 13,
         note: `${subject.trim()} · ${office} · ${lang}`,
       }
       if (row) await updateGroup(row.id, fields)
@@ -581,7 +581,16 @@ function MethodistGroupModal({ defaultOffice, row, onClose, onDone }) {
               <option value="рус">Русский</option>
             </select>
           </Field>
-          <div style={{ width: 110 }}><Field label="Вместимость"><input type="number" value={capacity} onChange={(e) => setCapacity(e.target.value)} style={inp} /></Field></div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Field label="Класс">
+            <select value={grade} onChange={(e) => setGrade(e.target.value)} style={inp}>
+              <option value="">— не указан —</option>
+              <option value="10">10 класс</option>
+              <option value="11">11 класс</option>
+            </select>
+          </Field>
+          <div style={{ width: 130 }}><Field label="Вместимость"><input type="number" value={capacity} onChange={(e) => setCapacity(e.target.value)} style={inp} /></Field></div>
         </div>
         <p style={{ fontSize: 11, color: C.faint, marginTop: 2 }}>
           Преподавателя и кабинет назначают во вкладке «Расписание» — там, где создаётся сам слот занятий.

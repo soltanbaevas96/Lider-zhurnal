@@ -290,6 +290,7 @@ function AttemptsTab({ dict, students, groups, schools, onOpenStudent, onExport 
   const [lang, setLang] = useState('')
   const [group, setGroup] = useState('')
   const [school, setSchool] = useState('')
+  const [grade, setGrade] = useState('')
   const [subj, setSubj] = useState('') // фикс. или профильный, по имени
   const [attemptNo, setAttemptNo] = useState('') // позиция попытки, 1-based
   const [scoreMin, setScoreMin] = useState(''); const [scoreMax, setScoreMax] = useState('')
@@ -305,6 +306,7 @@ function AttemptsTab({ dict, students, groups, schools, onOpenStudent, onExport 
   }, [students])
 
   const maxAttemptNo = rows.reduce((m, r) => Math.max(m, r._no), 0)
+  const grades = useMemo(() => [...new Set(students.map((s) => s.grade).filter(Boolean))].sort(), [students])
   const subjectOptions = useMemo(() => {
     const names = new Set()
     rows.forEach((r) => { names.add(r.subject1_name); names.add(r.subject2_name) })
@@ -317,6 +319,7 @@ function AttemptsTab({ dict, students, groups, schools, onOpenStudent, onExport 
     if (lang && s.lang !== lang) return false
     if (group && !s.groupIds.includes(group)) return false
     if (school && s.school !== school) return false
+    if (grade && s.grade !== grade) return false
     if (attemptNo && r._no !== Number(attemptNo)) return false
     if (subj) {
       const isFixed = FIXED_SUBJECTS.find((f) => f.label === subj)
@@ -349,6 +352,7 @@ function AttemptsTab({ dict, students, groups, schools, onOpenStudent, onExport 
         <SelectF value={lang} onChange={setLang} placeholder="Все языки" options={LANGS.map((l) => [l.k, l.t])} />
         <SelectF value={group} onChange={setGroup} placeholder="Все группы" options={groups.map((g) => [g.id, g.name])} />
         <SelectF value={school} onChange={setSchool} placeholder="Все школы" options={schools.map((s) => [s, s])} />
+        <SelectF value={grade} onChange={setGrade} placeholder="Все классы" options={grades.map((g) => [g, g])} />
         <SelectF value={subj} onChange={setSubj} placeholder="Любой предмет" options={subjectOptions.map((s) => [s, s])} />
         <SelectF value={attemptNo} onChange={setAttemptNo} placeholder="Попытка: все"
           options={Array.from({ length: maxAttemptNo }, (_, i) => [String(i + 1), `Попытка №${i + 1}`])} />
@@ -648,10 +652,13 @@ function AnalyticsTab({ dict, students, groups, schools }) {
   const [lang, setLang] = useState('')
   const [group, setGroup] = useState('')
   const [school, setSchool] = useState('')
+  const [grade, setGrade] = useState('')
+  const grades = useMemo(() => [...new Set(students.map((s) => s.grade).filter(Boolean))].sort(), [students])
 
   const filtered = students.filter((s) =>
     (!office || s.office === office) && (!lang || s.lang === lang) &&
-    (!group || s.groupIds.includes(group)) && (!school || s.school === school))
+    (!group || s.groupIds.includes(group)) && (!school || s.school === school) &&
+    (!grade || s.grade === grade))
 
   const agg = aggregate(filtered)
   const high = filtered.filter((s) => s.last != null && s.last >= 120).length
@@ -671,6 +678,13 @@ function AnalyticsTab({ dict, students, groups, schools }) {
     const list = students.filter((s) => s.office === o)
     return { office: o, ...aggregate(list) }
   })
+  // Сравнение 10 vs 11 класс — считаем от того же базового набора учеников,
+  // что и остальные фильтры (office/lang/group/school), но без самого
+  // фильтра класса, иначе сравнивать было бы нечего.
+  const baseForGradeCompare = students.filter((s) =>
+    (!office || s.office === office) && (!lang || s.lang === lang) &&
+    (!group || s.groupIds.includes(group)) && (!school || s.school === school))
+  const gradeRows = grades.map((g) => ({ grade: g, ...aggregate(baseForGradeCompare.filter((s) => s.grade === g)) }))
 
   return (
     <div>
@@ -679,6 +693,7 @@ function AnalyticsTab({ dict, students, groups, schools }) {
         <SelectF value={lang} onChange={setLang} placeholder="Все языки" options={LANGS.map((l) => [l.k, l.t])} />
         <SelectF value={group} onChange={setGroup} placeholder="Все группы" options={groups.map((g) => [g.id, g.name])} />
         <SelectF value={school} onChange={setSchool} placeholder="Все школы" options={schools.map((s) => [s, s])} />
+        <SelectF value={grade} onChange={setGrade} placeholder="Все классы" options={grades.map((g) => [g, g])} />
       </FilterBar>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, margin: '16px 0' }}>
@@ -734,6 +749,22 @@ function AnalyticsTab({ dict, students, groups, schools }) {
           ))}
         </div>
       </Panel>
+
+      {gradeRows.length > 0 && (
+        <Panel title="Сравнение 10 vs 11 класс">
+          <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: 'hidden' }}>
+            {gradeRows.map((r, i) => (
+              <div key={r.grade} className="rowflex" style={{ gap: 10, padding: '10px 14px', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 700 }}>{r.grade} класс</span>
+                <span style={{ fontSize: 12, color: C.slate, width: 90, textAlign: 'right' }}>{r.count} чел.</span>
+                <span style={{ fontSize: 12.5, fontWeight: 700, width: 90, textAlign: 'right' }}>ср. {r.avgLast ?? '—'}</span>
+                <span style={{ fontSize: 12.5, color: C.slate, width: 90, textAlign: 'right' }}>макс {r.best ?? '—'}</span>
+                <span style={{ width: 90, textAlign: 'right' }}><DynBadge d={r.avgDyn} /></span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
     </div>
   )
 }
