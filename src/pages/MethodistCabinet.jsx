@@ -100,7 +100,7 @@ export default function MethodistCabinet({ dict, onOpenStudent }) {
         <OverviewTab students={officeStudents} groups={officeGroups} slots={slots || []}
           onOpenTab={setTab} />
       ) : tab === 'students' ? (
-        <StudentsTab officeFilter={officeFilter} students={officeStudents} groups={officeGroups}
+        <StudentsTab officeFilter={officeFilter} students={officeStudents} groups={officeGroups} allGroups={groups || []}
           onOpenStudent={onOpenStudent} onChanged={reload} />
       ) : tab === 'groups' ? (
         <GroupsTab officeFilter={officeFilter} groups={officeGroups} students={officeStudents} onChanged={reload} />
@@ -216,7 +216,8 @@ function QuickBtn({ onClick, icon: Icon, text }) {
 }
 
 // ==================== УЧЕНИКИ ====================
-function StudentsTab({ officeFilter, students, groups, onOpenStudent, onChanged }) {
+function StudentsTab({ officeFilter, students, groups, allGroups, onOpenStudent, onChanged }) {
+  const officeOfGroupId = (id) => (allGroups || groups).find((g) => g.id === id)?.office
   const [q, setQ] = useState('')
   const [langFilter, setLangFilter] = useState('all')
   const [gradeFilter, setGradeFilter] = useState('all')
@@ -249,8 +250,11 @@ function StudentsTab({ officeFilter, students, groups, onOpenStudent, onChanged 
     { key: 'grade', label: 'Класс', width: 60, render: (s) => s.grade || '—' },
     { key: 'lang', label: 'Язык', width: 70, render: (s) => s.lang || '—' },
     ...(officeFilter === 'all' ? [{ key: 'office', label: 'Офис', width: 110, render: (s) => s.office || '—' }] : []),
-    { key: 'groups', label: 'Группы', render: (s) => s.groupsData?.length
-      ? s.groupsData.map((g) => g.name).join(', ')
+    { key: 'groups', label: 'Группы (офис группы, если отличается)', render: (s) => s.groupsData?.length
+      ? s.groupsData.map((g) => {
+          const gOffice = officeOfGroupId(g.id)
+          return gOffice && gOffice !== s.office ? `${g.name} (${gOffice})` : g.name
+        }).join(', ')
       : <span style={{ color: '#c2410c', fontWeight: 600 }}>без группы</span> },
     { key: 'phone', label: 'Телефон', width: 130, render: (s) => s.phone || '—' },
     { key: 'edit', label: '', width: 44, sortable: false, render: (s) => (
@@ -333,12 +337,15 @@ function MethodistStudentModal({ defaultOffice, groups, row, onClose, onDone }) 
   const currentGroups = groups.filter((g) => groupIds.includes(g.id))
   const availableGroups = groups.filter((g) => !groupIds.includes(g.id))
 
+  // Офис группы НЕ сравниваем с офисом ученика — ученик одного офиса
+  // может абсолютно нормально учиться в группе другого (см. ТЗ про
+  // разделение "офис ученика" / "офис группы"). Предупреждаем только
+  // про класс (10/11 не должны смешиваться) и язык обучения.
   function mismatchOf(g) {
     const reasons = []
     const gg = gradeOfGroup(g)
     if (grade && gg && String(grade).trim() !== gg) reasons.push(`класс группы ${gg}, у ученика ${grade}`)
     if (lang && g.lang && lang !== g.lang) reasons.push(`язык группы «${g.lang}», у ученика «${lang}»`)
-    if (office && g.office && office !== g.office) reasons.push(`офис группы «${g.office}», у ученика «${office}»`)
     return reasons
   }
 
@@ -611,9 +618,10 @@ function GroupRosterModal({ group, allStudents, onClose, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const inGroup = allStudents.filter((s) => (s.groupIds || []).includes(group.id))
-  // предлагаем добавить только учеников ТОГО ЖЕ офиса, что и группа —
-  // иначе при просмотре «Все офисы» тут перемешались бы все ученики центра.
-  const notInGroup = allStudents.filter((s) => !(s.groupIds || []).includes(group.id) && s.office === group.office)
+  // Офис ученика НЕ обязан совпадать с офисом группы (ученик Камзины
+  // может учиться в группе Маргуланы) — офисом тут не фильтруем,
+  // только поиском по имени; офис ученика показываем в строке.
+  const notInGroup = allStudents.filter((s) => !(s.groupIds || []).includes(group.id))
     .filter((s) => {
       const t = q.toLowerCase().trim()
       return !t || (s.full_name || '').toLowerCase().includes(t)
@@ -646,6 +654,11 @@ function GroupRosterModal({ group, allStudents, onClose, onChanged }) {
             <div key={s.id} className="rowflex" style={{ gap: 8, padding: '6px 0', borderBottom: `1px solid ${C.line}`, fontSize: 13 }}>
               <span>{s.full_name}</span>
               <span style={{ color: C.faint, fontSize: 11.5 }}>{s.school || ''}</span>
+              {s.office && s.office !== group.office && (
+                <span title="Офис ученика отличается от офиса группы — это нормально" style={{ color: C.brand, fontSize: 11, fontWeight: 700, background: C.brandSoft, padding: '2px 6px', borderRadius: 6 }}>
+                  {s.office}
+                </span>
+              )}
               <button onClick={() => remove(s.id)} disabled={busy} title="Убрать из группы"
                 style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', display: 'flex' }}>
                 <UserMinus size={15} />
@@ -660,7 +673,7 @@ function GroupRosterModal({ group, allStudents, onClose, onChanged }) {
           {notInGroup.slice(0, 50).map((s) => (
             <div key={s.id} className="rowflex" style={{ gap: 8, padding: '6px 0', borderBottom: `1px solid ${C.line}`, fontSize: 13 }}>
               <span>{s.full_name}</span>
-              <span style={{ color: C.faint, fontSize: 11.5 }}>{s.grade ? `${s.grade} класс` : ''}</span>
+              <span style={{ color: C.faint, fontSize: 11.5 }}>{s.grade ? `${s.grade} класс` : ''}{s.office && s.office !== group.office ? ` · ${s.office}` : ''}</span>
               <button onClick={() => add(s.id)} disabled={busy}
                 style={{ marginLeft: 'auto', padding: '4px 10px', background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                 + Добавить
