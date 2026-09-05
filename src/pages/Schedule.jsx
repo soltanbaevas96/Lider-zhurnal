@@ -29,14 +29,21 @@ const STATUS_META = {
 }
 const fmtHM = (t) => (t || '').slice(0, 5)
 
-export default function Schedule({ dict, isAdmin }) {
+// isAdmin — управляет только массовыми/системными действиями (Импорт,
+// «Создать занятия» пачкой). canEdit — обычный CRUD слотов (добавить/
+// изменить/перенести/удалить) — по умолчанию совпадает с isAdmin, но
+// методист получает canEdit=true, isAdmin=false (свой офис, без массовых
+// инструментов). lockedOffice — если задан, офис не выбирается, а
+// зафиксирован (кабинет методиста — только его офис).
+export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
+  const canEditSlots = canEdit ?? isAdmin
   const [slots, setSlots] = useState(null)
   const [missed, setMissed] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
 
   const [mode, setMode] = useState('week') // week | groups | teachers
-  const [office, setOffice] = useState('')
+  const [office, setOffice] = useState(lockedOffice || '')
   const [room, setRoom] = useState('')
   const [q, setQ] = useState('')
   const [refDate, setRefDate] = useState(() => todayStr())
@@ -178,11 +185,13 @@ export default function Schedule({ dict, isAdmin }) {
               style={{ gap: 6, padding: '8px 14px', background: C.teal, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
               <Zap size={15} /> Создать занятия
             </button>
-            <button onClick={() => setEditSlot('new')} className="rowflex"
-              style={{ gap: 6, padding: '8px 14px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-              <Plus size={16} /> Добавить занятие
-            </button>
           </>
+        )}
+        {canEditSlots && (
+          <button onClick={() => setEditSlot(lockedOffice ? { office: lockedOffice } : 'new')} className="rowflex"
+            style={{ gap: 6, padding: '8px 14px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+            <Plus size={16} /> Добавить занятие
+          </button>
         )}
         <div style={{ position: 'relative' }}>
           <button onClick={() => setExcelOpen((v) => !v)} className="rowflex"
@@ -235,10 +244,16 @@ export default function Schedule({ dict, isAdmin }) {
         })}
       </div>
       <div className="no-print rowflex" style={{ gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select value={office} onChange={(e) => { setOffice(e.target.value); setRoom('') }} style={selSty}>
-          <option value="">Все офисы</option>
-          {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
+        {lockedOffice ? (
+          <span className="rowflex" style={{ gap: 6, padding: '8px 14px', background: C.grey, borderRadius: 10, fontSize: 13, fontWeight: 700, color: C.ink }}>
+            Офис: {lockedOffice}
+          </span>
+        ) : (
+          <select value={office} onChange={(e) => { setOffice(e.target.value); setRoom('') }} style={selSty}>
+            <option value="">Все офисы</option>
+            {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        )}
         {mode === 'week' && (
           <select value={room} onChange={(e) => setRoom(e.target.value)} style={selSty}>
             <option value="">Все кабинеты</option>
@@ -271,8 +286,8 @@ export default function Schedule({ dict, isAdmin }) {
                   <div className="rowflex" style={{ background: C.grey, padding: '8px 12px', gap: 6 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 800, color: items.length ? C.ink : C.faint }}>{w.t}</span>
                     <span style={{ color: C.faint, fontWeight: 600, fontSize: 12 }}>· {items.length}</span>
-                    {isAdmin && (
-                      <button onClick={() => setEditSlot({ weekday: w.n, office: office || OFFICES[0] })} title="Добавить в этот день"
+                    {canEditSlots && (
+                      <button onClick={() => setEditSlot({ weekday: w.n, office: office || lockedOffice || OFFICES[0] })} title="Добавить в этот день"
                         style={{ marginLeft: 'auto', border: 'none', background: 'none', color: C.brand, cursor: 'pointer', display: 'flex' }}>
                         <Plus size={15} />
                       </button>
@@ -282,7 +297,7 @@ export default function Schedule({ dict, isAdmin }) {
                     {items.length === 0 ? (
                       <div style={{ fontSize: 12, color: C.faint, textAlign: 'center' }}>нет занятий</div>
                     ) : items.map((r) => (
-                      <SlotCard key={r.id} r={r} isAdmin={isAdmin} draggable={isAdmin}
+                      <SlotCard key={r.id} r={r} isAdmin={canEditSlots} draggable={canEditSlots}
                         onDragStart={() => setDragId(r.id)}
                         onClick={() => setEditSlot(r)} />
                     ))}
@@ -295,7 +310,7 @@ export default function Schedule({ dict, isAdmin }) {
       )}
 
       {editSlot && (
-        <SlotModal slot={editSlot} dict={dict} roomOptions={roomOptions}
+        <SlotModal slot={editSlot} dict={dict} roomOptions={roomOptions} lockedOffice={lockedOffice}
           onClose={() => setEditSlot(null)}
           onSaved={async () => { setEditSlot(null); await load() }}
           onDelete={(id) => { setEditSlot(null); setConfirmDel(id) }} />
@@ -448,9 +463,9 @@ const navBtn = { width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.
 const selSty = { padding: '8px 10px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 12.5, outline: 'none', background: '#fff' }
 
 // ================= СОЗДАНИЕ / РЕДАКТИРОВАНИЕ СЛОТА =================
-function SlotModal({ slot, dict, roomOptions, onClose, onSaved, onDelete }) {
+function SlotModal({ slot, dict, roomOptions, lockedOffice, onClose, onSaved, onDelete }) {
   const editing = slot !== 'new' && slot?.id
-  const [office, setOffice] = useState(slot?.office || OFFICES[0])
+  const [office, setOffice] = useState(lockedOffice || slot?.office || OFFICES[0])
   const [room, setRoom] = useState(slot?.room || '')
   const [groupId, setGroupId] = useState(slot?.group_id || '')
   const [teacherId, setTeacherId] = useState(slot?.teacher_id || '')
@@ -529,9 +544,13 @@ function SlotModal({ slot, dict, roomOptions, onClose, onSaved, onDelete }) {
         <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <Label>Офис *</Label>
-            <select value={office} onChange={(e) => setOffice(e.target.value)} style={inpSty}>
-              {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
+            {lockedOffice ? (
+              <div style={{ ...inpSty, background: C.grey, display: 'flex', alignItems: 'center' }}>{lockedOffice}</div>
+            ) : (
+              <select value={office} onChange={(e) => setOffice(e.target.value)} style={inpSty}>
+                {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            )}
           </div>
           <div style={{ flex: 1 }}>
             <Label>Кабинет *</Label>

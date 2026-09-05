@@ -986,6 +986,21 @@ export async function fetchProfilesByRole(roles) {
   return data || []
 }
 
+// То же самое, но с реальным статусом входа (активен/заблокирован) —
+// он хранится не в profiles, а в auth.users, поэтому через RPC
+// (используется вкладкой «Методисты», где статус нужно показывать).
+export async function fetchAccountsByRole(roles) {
+  const { data, error } = await supabase.rpc('admin_list_accounts', { p_roles: roles })
+  if (error) throw error
+  return data || []
+}
+
+// Заблокировать/разблокировать вход без удаления учётки и её данных.
+export async function setAccountActive(profileId, active) {
+  const { error } = await supabase.rpc('admin_set_account_active', { p_profile_id: profileId, p_active: active })
+  if (error) throw error
+}
+
 // Создание учётки (преподаватель/куратор/ассистент/любая роль) — через
 // Edge Function invite-teacher (не RPC: правильное создание пользователя
 // Supabase Auth требует Admin API, а не голого INSERT в auth.users).

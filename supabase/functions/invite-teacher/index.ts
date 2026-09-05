@@ -25,7 +25,7 @@ const EMAIL_DOMAIN = 'lider.local'
 
 const VALID_ROLES = [
   'teacher', 'admin', 'director', 'assistant',
-  'office_manager', 'senior_office_manager', 'accountant',
+  'office_manager', 'senior_office_manager', 'accountant', 'methodist',
 ]
 
 // kind (Manage.jsx вкладка) -> таблица-карточка сотрудника
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
       role: wantRole,
       full_name: full_name ?? '',
       username,
-      office: wantRole === 'office_manager' ? (office || null) : null,
+      office: (wantRole === 'office_manager' || wantRole === 'methodist') ? (office || null) : null,
     }).eq('id', newUserId)
     if (profErr) return json({ error: 'Пользователь создан, но не удалось настроить профиль: ' + profErr.message }, 200)
 

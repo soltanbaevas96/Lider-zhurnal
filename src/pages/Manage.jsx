@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import {
-  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search, Trash2, Wallet, Building2, Upload, AlertTriangle,
+  ArrowLeft, Plus, Pencil, Archive, RotateCcw, X, GraduationCap, UserCheck, Users, Check, KeyRound, ShieldCheck, BookOpen, Link2, UsersRound, Search, Trash2, Wallet, Building2, Upload, AlertTriangle, ClipboardList, Lock, Unlock,
 } from 'lucide-react'
 import DataTable from '../components/DataTable'
 import { C, initials, nameOf, avColorByIndex, loginFromName, genPassword, officeOf, langOf, OFFICES } from '../lib/utils'
@@ -11,7 +11,7 @@ import {
   fetchTeacherLinks, saveTeacherLinks, fetchStudentsWithGroups, addStudent, updateStudent, fetchStudentsOfGroup,
   addStudentToGroup, removeStudentFromGroup, fetchAllStudents, deleteStudent, findStudentsByName,
   getAccountInfo, adminSetPassword, adminSetRole, adminSoftDelete, adminCreateAccount,
-  fetchProfilesByRole, adminUpdateProfileName,
+  fetchProfilesByRole, adminUpdateProfileName, fetchAccountsByRole, setAccountActive,
 } from '../lib/api'
 
 export default function Manage({ dict, subjects, onBack, onChanged, onOpenStudent }) {
@@ -36,6 +36,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
     { k: 'curators', t: 'Кураторы', icon: UserCheck },
     { k: 'assistants', t: 'Ассистенты', icon: UserCheck },
     { k: 'office_managers', t: 'Офис-менеджеры', icon: Building2 },
+    { k: 'methodists', t: 'Методисты', icon: ClipboardList },
     { k: 'accountants', t: 'Бухгалтер', icon: Wallet },
     { k: 'students', t: 'Ученики', icon: UsersRound },
     { k: 'groups', t: 'Группы', icon: Users },
@@ -44,7 +45,7 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
   // Вкладки без карточек-таблиц (office_managers/accountants) и ученики
   // используют свои собственные экраны/кнопки — общий блок «Добавить» и
   // «Показывать архивные» тут не подходит.
-  const isAccountsOnlyTab = tab === 'office_managers' || tab === 'accountants'
+  const isAccountsOnlyTab = tab === 'office_managers' || tab === 'accountants' || tab === 'methodists'
 
   let rows = (dict[tab] || []).filter((r) => showArchived ? true : !r.archived)
   // Группы дополнительно фильтруем по офису и языку (из note) + поиск
@@ -156,6 +157,12 @@ export default function Manage({ dict, subjects, onBack, onChanged, onOpenStuden
             { v: 'office_manager', t: 'Обычный — свой офис' },
             { v: 'senior_office_manager', t: 'Старший — все офисы' },
           ]}
+        />
+      ) : tab === 'methodists' ? (
+        <AccountsManage
+          roles={['methodist']}
+          roleOptions={[{ v: 'methodist', t: 'Методист' }]}
+          withStatus
         />
       ) : tab === 'accountants' ? (
         <AccountsManage
@@ -883,17 +890,21 @@ const ROLE_LABEL = {
   office_manager: 'обычный офис-менеджер',
   senior_office_manager: 'старший офис-менеджер',
   accountant: 'бухгалтер',
+  methodist: 'методист',
 }
+// Роли, у которых есть привязка к офису (нужен select «Офис» в форме).
+const ROLES_WITH_OFFICE = ['office_manager', 'methodist']
 
-function AccountsManage({ roles, roleOptions }) {
+function AccountsManage({ roles, roleOptions, withStatus }) {
   const [rows, setRows] = useState(null)
   const [modal, setModal] = useState(null) // 'new' | { row }
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [confirmBlock, setConfirmBlock] = useState(null) // строка для подтверждения блокировки/разблокировки
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   async function reload() {
-    try { setRows(await fetchProfilesByRole(roles)) }
+    try { setRows(await (withStatus ? fetchAccountsByRole(roles) : fetchProfilesByRole(roles))) }
     catch (e) { setErr(e.message) }
   }
   useEffect(() => { reload() }, [roles.join(',')])
@@ -923,22 +934,44 @@ function AccountsManage({ roles, roleOptions }) {
             <div style={{ flex: 1, minWidth: 120 }}>
               <div className="rowflex" style={{ gap: 8 }}>
                 <span style={{ fontWeight: 600, fontSize: 13.5 }}>{r.full_name || <span style={{ color: C.faint }}>без имени</span>}</span>
-                <span className="rowflex" style={{ gap: 3, fontSize: 10.5, fontWeight: 600, color: C.ok, background: C.okSoft, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>
-                  <ShieldCheck size={10} /> доступ
-                </span>
+                {withStatus ? (
+                  r.active ? (
+                    <span className="rowflex" style={{ gap: 3, fontSize: 10.5, fontWeight: 600, color: C.ok, background: C.okSoft, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                      <ShieldCheck size={10} /> активен
+                    </span>
+                  ) : (
+                    <span className="rowflex" style={{ gap: 3, fontSize: 10.5, fontWeight: 600, color: '#dc2626', background: '#fee2e2', padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                      <Lock size={10} /> заблокирован
+                    </span>
+                  )
+                ) : (
+                  <span className="rowflex" style={{ gap: 3, fontSize: 10.5, fontWeight: 600, color: C.ok, background: C.okSoft, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                    <ShieldCheck size={10} /> доступ
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 11.5, color: C.slate }}>
-                {ROLE_LABEL[r.role] || r.role}{r.role === 'office_manager' && r.office ? ` · ${r.office}` : ''}
+                {ROLE_LABEL[r.role] || r.role}{ROLES_WITH_OFFICE.includes(r.role) && r.office ? ` · ${r.office}` : ''}
               </div>
             </div>
             <button onClick={() => setModal({ row: r })} disabled={busy} className="rowflex" title="Логин, пароль, доступ"
               style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.brand, background: C.brandSoft, border: 'none', cursor: 'pointer' }}>
               <KeyRound size={13} /> <span className="hide-sm">Профиль</span>
             </button>
-            <button onClick={() => setConfirmDelete(r)} disabled={busy} title="Удалить"
-              style={{ padding: 7, borderRadius: 8, color: '#dc2626', background: '#fee2e2', border: 'none', cursor: 'pointer' }}>
-              <Trash2 size={14} />
-            </button>
+            {withStatus ? (
+              <button onClick={() => setConfirmBlock(r)} disabled={busy} className="rowflex"
+                title={r.active ? 'Заблокировать' : 'Разблокировать'}
+                style={{ gap: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
+                  color: r.active ? '#dc2626' : C.ok, background: r.active ? '#fee2e2' : C.okSoft }}>
+                {r.active ? <Lock size={13} /> : <Unlock size={13} />}
+                <span className="hide-sm">{r.active ? 'Заблокировать' : 'Разблокировать'}</span>
+              </button>
+            ) : (
+              <button onClick={() => setConfirmDelete(r)} disabled={busy} title="Удалить"
+                style={{ padding: 7, borderRadius: 8, color: '#dc2626', background: '#fee2e2', border: 'none', cursor: 'pointer' }}>
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -963,6 +996,23 @@ function AccountsManage({ roles, roleOptions }) {
           onConfirm={async () => {
             const r = confirmDelete; setConfirmDelete(null); setBusy(true)
             try { await adminSoftDelete('accounts', r.id); await reload() }
+            catch (e) { setErr(e.message) } finally { setBusy(false) }
+          }}
+        />
+      )}
+
+      {confirmBlock && (
+        <ConfirmModal
+          title={confirmBlock.active ? 'Заблокировать методиста?' : 'Разблокировать методиста?'}
+          message={confirmBlock.active
+            ? `«${confirmBlock.full_name}» больше не сможет войти в систему. Все его группы, ученики и история действий сохранятся — можно разблокировать в любой момент.`
+            : `«${confirmBlock.full_name}» снова сможет входить в систему.`}
+          confirmText={confirmBlock.active ? 'Заблокировать' : 'Разблокировать'}
+          danger={confirmBlock.active}
+          onCancel={() => setConfirmBlock(null)}
+          onConfirm={async () => {
+            const r = confirmBlock; setConfirmBlock(null); setBusy(true)
+            try { await setAccountActive(r.id, !r.active); await reload() }
             catch (e) { setErr(e.message) } finally { setBusy(false) }
           }}
         />
@@ -996,7 +1046,7 @@ function AccountOnlyModal({ row, roleOptions, defaultRole, onClose, onDone }) {
     if (!pass || pass.length < 4) { setErr('Пароль минимум 4 символа'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
-      await adminCreateAccount(null, null, login.trim().toLowerCase(), pass, role, fullName.trim(), role === 'office_manager' ? office : null)
+      await adminCreateAccount(null, null, login.trim().toLowerCase(), pass, role, fullName.trim(), ROLES_WITH_OFFICE.includes(role) ? office : null)
       setMsg('Учётка создана')
       await onDone()
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
@@ -1022,7 +1072,7 @@ function AccountOnlyModal({ row, roleOptions, defaultRole, onClose, onDone }) {
   async function saveRole() {
     setBusy(true); setErr(''); setMsg('')
     try {
-      await adminSetRole(row.id, role, role === 'office_manager' ? office : null)
+      await adminSetRole(row.id, role, ROLES_WITH_OFFICE.includes(role) ? office : null)
       setMsg('Доступ обновлён')
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
@@ -1055,7 +1105,7 @@ function AccountOnlyModal({ row, roleOptions, defaultRole, onClose, onDone }) {
                 </select>
               </Field>
             )}
-            {role === 'office_manager' && (
+            {ROLES_WITH_OFFICE.includes(role) && (
               <Field label="Офис">
                 <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
                   <option value="">— выберите —</option>
@@ -1108,7 +1158,7 @@ function AccountOnlyModal({ row, roleOptions, defaultRole, onClose, onDone }) {
                 </select>
               </Field>
             )}
-            {role === 'office_manager' && (
+            {ROLES_WITH_OFFICE.includes(role) && (
               <Field label="Офис">
                 <select value={office} onChange={(e) => setOffice(e.target.value)} style={inp}>
                   <option value="">— выберите —</option>

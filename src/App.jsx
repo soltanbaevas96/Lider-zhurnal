@@ -8,6 +8,7 @@ import Login from './pages/Login'
 import TeacherCabinet from './pages/TeacherCabinet'
 import AdminCabinet from './pages/AdminCabinet'
 import OfficeManagerCabinet from './pages/OfficeManagerCabinet'
+import MethodistCabinet from './pages/MethodistCabinet'
 import CuratorCabinet from './pages/CuratorCabinet'
 import Manage from './pages/Manage'
 import Dashboard from './pages/Dashboard'
@@ -23,7 +24,7 @@ import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
 
 export default function App() {
-  const { session, profile, teacher, curator, isCurator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, isAccountant, managerOffice, loading, signOut } = useAuth()
+  const { session, profile, teacher, curator, isCurator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, isAccountant, isMethodist, managerOffice, loading, signOut } = useAuth()
   // Бухгалтер видит только Зарплату/Табель/Оплаты — без остальных управленческих разделов
   const canSeeFinance = isManager || isAccountant
 
@@ -143,6 +144,7 @@ export default function App() {
                 {isDirector ? 'Кабинет директора' : isAdmin ? 'Кабинет завуча'
                   : isSeniorOM ? 'Старший офис-менеджер' : isOfficeManager ? `Офис-менеджер · ${managerOffice || ''}`
                   : isAccountant ? 'Бухгалтер'
+                  : isMethodist ? `Методист · ${managerOffice || ''}`
                   : profile?.role === 'assistant' ? 'Ассистент' : 'Кабинет преподавателя'}
               </div>
             </div>
@@ -279,6 +281,14 @@ export default function App() {
             isSenior={isSeniorOM}
             onOpenStudent={(id) => setOpenStudent(id)}
           />
+        ) : isMethodist ? (
+          !managerOffice ? (
+            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center', color: C.slate }}>
+              Вашей учётке методиста не назначен офис. Обратитесь к завучу.
+            </div>
+          ) : (
+            <MethodistCabinet office={managerOffice} dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
+          )
         ) : profile?.role === 'assistant' ? (
           <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center' }}>
             <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8 }}>
