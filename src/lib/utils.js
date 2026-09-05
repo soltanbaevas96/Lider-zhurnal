@@ -159,7 +159,7 @@ export const AVATAR_COLORS = ['#4338ca', '#0d9488', '#c2410c', '#7c3aed', '#0369
 export const avColorByIndex = (i) => AVATAR_COLORS[i % AVATAR_COLORS.length]
 
 // ---------- ОФИС И ЯЗЫК (из note группы / contact ученика) ----------
-export const OFFICES = ['Маргулана', 'Усолка', 'Торайгырова']
+export const OFFICES = ['Маргулана', 'Усолка', 'Торайгырова', 'Камзина', 'Чокина']
 
 // Извлекает офис из строки-заметки (ищет одно из известных названий)
 export function officeOf(text) {
