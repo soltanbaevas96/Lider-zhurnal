@@ -682,13 +682,16 @@ export async function fetchScheduleSlots(office) {
   return data || []
 }
 
-// Живая проверка конфликтов (кабинет/преподаватель) — до сохранения,
-// чтобы форма могла показать предупреждение сразу, не дожидаясь отказа
-// от save_schedule_slot. slot: { office, room, teacherId, weekday,
+// Живая проверка конфликтов — до сохранения, чтобы форма могла показать
+// предупреждение сразу, не дожидаясь отказа от save_schedule_slot.
+// Кабинет/группа — конфликт только внутри одного офиса; преподаватель/
+// ассистент — глобально по всем офисам (миграция 66, п.5,8,33-35 ТЗ).
+// slot: { office, room, teacherId, assistantId, groupId, weekday,
 // startTime, endTime, activeFrom, activeTo, excludeId }
 export async function checkScheduleConflicts(slot) {
   const { data, error } = await supabase.rpc('check_schedule_conflicts', {
     p_office: slot.office, p_room: slot.room, p_teacher_id: slot.teacherId || null,
+    p_assistant_id: slot.assistantId || null, p_group_id: slot.groupId || null,
     p_weekday: slot.weekday, p_start: slot.startTime, p_end: slot.endTime,
     p_active_from: slot.activeFrom || null, p_active_to: slot.activeTo || null,
     p_exclude_id: slot.excludeId || null,

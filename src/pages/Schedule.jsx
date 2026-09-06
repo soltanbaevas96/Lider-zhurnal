@@ -17,10 +17,7 @@ const WD = [
 ]
 
 // Единая цветовая система статуса — статус хранится отдельным полем в БД
-// (schedule.status), цвет только сопровождает его, а не заменяет (п.6, 34 ТЗ).
-// У «Расписания» до этой переделки статусов/цветов не было вообще — бордовый
-// как отдельный «особый подтверждённый» тип это новый статус на будущее,
-// наследовать было нечего.
+// (schedule.status), цвет только сопровождает его, а не заменяет.
 const STATUS_META = {
   confirmed: { label: 'Подтверждено', color: '#1e3a8a', bg: '#e5edff', border: '#93b0f0' },
   confirmed_special: { label: 'Подтверждено (особое)', color: '#7f1d1d', bg: '#fbe7e7', border: '#e3a3a3' },
@@ -28,23 +25,87 @@ const STATUS_META = {
   occupied_other: { label: 'Занято — другой центр', color: '#4b5563', bg: '#eef0f4', border: '#c7cbd3' },
 }
 const fmtHM = (t) => (t || '').slice(0, 5)
-// 'HH:MM' -> минуты с начала суток, и обратно (с округлением до 5 минут —
-// достаточная точность для сетки, п.9 ТЗ: реальные времена, не только час).
+// 'HH:MM' -> минуты с начала суток, и обратно.
 const toMin = (t) => { const [h, m] = (t || '0:0').slice(0, 5).split(':').map(Number); return h * 60 + (m || 0) }
 const fromMin = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
+const isRealStatus = (s) => s === 'confirmed' || s === 'confirmed_special'
+const timeOverlap = (a, b) => toMin(a.start_time) < toMin(b.end_time) && toMin(b.start_time) < toMin(a.end_time)
+const INF_DATE = '9999-12-31'
+const dateRangesOverlap = (a, b) =>
+  (a.active_from || '0001-01-01') <= (b.active_to || INF_DATE) && (a.active_to || INF_DATE) >= (b.active_from || '0001-01-01')
+
+// Последний выбранный офис (п.12-13 ТЗ) — только удобство на этом
+// браузере, не источник истины ни для чего; при ошибке чтения/записи
+// (приватный режим и т.п.) просто ничего не сохраняем/не читаем.
+const LAST_OFFICE_KEY = 'lp_schedule_office'
+function getStoredOffice() {
+  try { return localStorage.getItem(LAST_OFFICE_KEY) || '' } catch { return '' }
+}
+function setStoredOffice(o) {
+  try { localStorage.setItem(LAST_OFFICE_KEY, o) } catch { /* ignore */ }
+}
+
+// Конфликты — единая функция для сетки/списка/статистики (п.5-9,32-35 ТЗ):
+//  - КАБИНЕТ и ГРУППА проверяются ТОЛЬКО внутри одного офиса (officeItems
+//    здесь — уже все занятия ТЕКУЩЕГО офиса, без учёта строчных фильтров
+//    кабинета/преподавателя/группы/поиска — иначе фильтр мог бы случайно
+//    спрятать вторую половину настоящего конфликта).
+//  - ПРЕПОДАВАТЕЛЬ и АССИСТЕНТ проверяются ГЛОБАЛЬНО по всем офисам
+//    (allItems — вообще все занятия центра) — человек физически не может
+//    вести два занятия одновременно, даже в разных офисах.
+// Возвращает Map(id -> { room, group, teacher: otherSlot|null, assistant: otherSlot|null }).
+function computeConflicts(officeItems, allItems) {
+  const map = new Map()
+  const ensure = (id) => {
+    if (!map.has(id)) map.set(id, { room: false, group: false, teacher: null, assistant: null })
+    return map.get(id)
+  }
+  const sameSlot = (a, b) => a.weekday === b.weekday && timeOverlap(a, b) && dateRangesOverlap(a, b)
+
+  for (let i = 0; i < officeItems.length; i++) {
+    for (let j = i + 1; j < officeItems.length; j++) {
+      const a = officeItems[i], b = officeItems[j]
+      if (!sameSlot(a, b)) continue
+      if (a.room && b.room && a.room === b.room) { ensure(a.id).room = true; ensure(b.id).room = true }
+      if (a.group_id && b.group_id && a.group_id === b.group_id) { ensure(a.id).group = true; ensure(b.id).group = true }
+    }
+  }
+
+  officeItems.forEach((a) => {
+    if (!isRealStatus(a.status)) return
+    if (a.teacher_id) {
+      const clash = allItems.find((b) => b.id !== a.id && b.teacher_id === a.teacher_id && isRealStatus(b.status) && sameSlot(a, b))
+      if (clash) ensure(a.id).teacher = clash
+    }
+    if (a.assistant_id) {
+      const clash = allItems.find((b) => b.id !== a.id && b.assistant_id === a.assistant_id && isRealStatus(b.status) && sameSlot(a, b))
+      if (clash) ensure(a.id).assistant = clash
+    }
+  })
+
+  return map
+}
+// Короткая, конкретная подпись конфликта для карточки/тултипа (п.9,34 ТЗ:
+// не «Конфликт расписания», а понятная причина).
+function conflictLabel(info) {
+  if (!info) return null
+  if (info.room) return 'Конфликт кабинета'
+  if (info.group) return 'Группа уже занята'
+  if (info.teacher) return `Преподаватель занят в ${info.teacher.office} ${fmtHM(info.teacher.start_time)}–${fmtHM(info.teacher.end_time)}`
+  if (info.assistant) return `Ассистент занят в ${info.assistant.office} ${fmtHM(info.assistant.start_time)}–${fmtHM(info.assistant.end_time)}`
+  return null
+}
 
 // isAdmin — управляет только массовыми/системными действиями (Импорт,
-// «Создать занятия» пачкой). canEdit — обычный CRUD слотов (добавить/
-// изменить/перенести/удалить) — по умолчанию совпадает с isAdmin, но
-// методист получает canEdit=true, isAdmin=false (свой офис, без массовых
-// инструментов). lockedOffice — если задан, офис не выбирается, а
-// зафиксирован (кабинет методиста — только его офис).
+// «Создать занятия» пачкой) + правом переносить занятие в другой офис.
+// canEdit — обычный CRUD слотов в ТЕКУЩЕМ офисе — по умолчанию совпадает
+// с isAdmin, но методист получает canEdit=true, isAdmin=false (свой офис,
+// без массовых инструментов). lockedOffice — если задан, офис не
+// выбирается, а зафиксирован (кабинет методиста — только его офис).
 export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullBleed }) {
   const canEditSlots = canEdit ?? isAdmin
 
-  // Расписание — единственный экран, которому нужна полная ширина окна
-  // (рабочая сетка методиста/завуча, п.3 ТЗ). Сообщаем об этом наверх,
-  // в App.jsx, и снимаем флаг при уходе со страницы.
+  // Расписание — единственный экран, которому нужна полная ширина окна.
   useEffect(() => {
     onFullBleed?.(true)
     return () => onFullBleed?.(false)
@@ -56,21 +117,22 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const [err, setErr] = useState('')
 
   const [mode, setMode] = useState('week') // week | list | groups | teachers
-  const [office, setOffice] = useState(lockedOffice || '')
+  // «Все офисы» больше не рабочий режим (п.2,12 ТЗ) — офис всегда
+  // конкретный: зафиксированный (методист) → последний выбранный на этом
+  // браузере → первый из справочника.
+  const [office, setOffice] = useState(() => lockedOffice || getStoredOffice() || OFFICES[0])
   const [room, setRoom] = useState('')
   const [grade, setGrade] = useState('')
   const [teacherF, setTeacherF] = useState('')
   const [groupF, setGroupF] = useState('')
   const [q, setQ] = useState('')
   const [refDate, setRefDate] = useState(() => todayStr())
-  // Адаптивный показ дней (п.6, 49.1 ТЗ) — на узком экране/ноутбуке не
-  // нужно насильно втискивать все 7 дней, если из-за этого текст
-  // перестаёт читаться. dayOffset — с какого дня недели показываем,
-  // когда dayCount < 7 (переключается стрелками внутри самой сетки).
+  // Адаптивный показ дней — на узком экране/ноутбуке не нужно насильно
+  // втискивать все 7 дней, если из-за этого текст перестаёт читаться.
   const [dayCount, setDayCount] = useState(7)
   const [dayOffset, setDayOffset] = useState(0)
 
-  const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, office } для нового с предзаполнением
+  const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, start_time, end_time } для нового с предзаполнением
   const [confirmDel, setConfirmDel] = useState(null)
   const [gen, setGen] = useState(false)
   const [excelOpen, setExcelOpen] = useState(false)
@@ -78,14 +140,28 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [fullscreen, setFullscreen] = useState(false)
-  const [confirmMove, setConfirmMove] = useState(null) // { id, weekday, startTime, endTime, oldLabel, newLabel }
   const pageRef = useRef(null)
+
+  function changeOffice(next) {
+    if (next === office) return
+    setOffice(next)
+    if (!lockedOffice) setStoredOffice(next)
+    // Старые данные другого офиса не должны оставаться в фильтрах (п.13 ТЗ).
+    setRoom(''); setGroupF(''); setQ('')
+  }
 
   const reqId = useRef(0)
   async function load() {
     const id = ++reqId.current
     setLoading(true); setErr('')
     try {
+      // Грузим расписание ВСЕХ офисов одним запросом (не по одному на
+      // каждый переключатель) — это нужно, чтобы корректно проверять
+      // глобальный конфликт преподавателя/ассистента между офисами
+      // (п.8,34-35 ТЗ). Но дальше, ДО любого расчёта (ширины карточек,
+      // конфликтов кабинета/группы, статистики), всё сразу фильтруется
+      // по текущему офису (п.10-11,25 ТЗ) — другие офисы эти расчёты
+      // никак не затрагивают.
       const [rows, miss] = await Promise.all([fetchScheduleSlots(), fetchMissedLessons(14).catch(() => [])])
       if (id !== reqId.current) return
       setSlots(rows); setMissed(miss)
@@ -99,24 +175,24 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const weekStart = useMemo(() => mondayOf(refDate), [refDate])
   const weekEnd = useMemo(() => addDaysStr(weekStart, 6), [weekStart])
 
-  const roomOptions = useMemo(() => {
-    if (!slots) return []
-    return [...new Set(slots.filter((s) => !office || s.office === office).map((s) => s.room))].sort()
-  }, [slots, office])
+  // Все занятия ТЕКУЩЕГО офиса (без учёта фильтров кабинета/преподавателя/
+  // группы/поиска/недели) — база и для расчёта конфликтов кабинета/группы,
+  // и для «По группам»/«По преподавателям» этого офиса.
+  const officeSlots = useMemo(() => (slots || []).filter((r) => r.office === office), [slots, office])
+
+  const roomOptions = useMemo(() => [...new Set(officeSlots.map((s) => s.room))].sort(), [officeSlots])
 
   // Класс слота — у самого schedule такого поля нет, берём из его группы
-  // (groups.grade, миграция 63). Без группы (резерв/занято) — класс не определён.
+  // (groups.grade).
   const gradeOfSlot = (r) => (dict.groups || []).find((g) => g.id === r.group_id)?.grade || null
 
+  const conflictMap = useMemo(() => computeConflicts(officeSlots, slots || []), [officeSlots, slots])
+
   // Слот считается видимым в выбранной неделе, если период его действия
-  // (active_from/active_to) пересекается с [weekStart, weekEnd] — половина
-  // расписания могла смениться в середине месяца (п.21-22 ТЗ), это и есть
-  // способ увидеть «расписание на конкретную неделю», а не только «сейчас».
+  // (active_from/active_to) пересекается с [weekStart, weekEnd].
   const visibleSlots = useMemo(() => {
-    if (!slots) return []
     const s = q.trim().toLowerCase()
-    return slots.filter((r) => {
-      if (office && r.office !== office) return false
+    return officeSlots.filter((r) => {
       if (room && r.room !== room) return false
       if (grade && gradeOfSlot(r) !== grade) return false
       if (teacherF && r.teacher_id !== teacherF) return false
@@ -126,73 +202,22 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
       if (!s) return true
       return (r.group_name || '').toLowerCase().includes(s) || (r.teacher_name || '').toLowerCase().includes(s) || (r.room || '').toLowerCase().includes(s)
     })
-  }, [slots, office, room, grade, teacherF, groupF, q, weekStart, weekEnd, dict.groups])
+  }, [officeSlots, room, grade, teacherF, groupF, q, weekStart, weekEnd, dict.groups])
 
-  // Сводка сверху (п.43 ТЗ): «настоящих» занятий/резервов/занято по фильтру.
+  // Сводка сверху — «настоящих» занятий/резервов/занято/конфликтов
+  // текущего офиса (п.14 ТЗ).
   const summary = useMemo(() => {
-    const real = visibleSlots.filter((r) => r.status === 'confirmed' || r.status === 'confirmed_special')
+    const real = visibleSlots.filter((r) => isRealStatus(r.status))
     const reserve = visibleSlots.filter((r) => r.status === 'reserve')
     const occupied = visibleSlots.filter((r) => r.status === 'occupied_other')
-    return { real: real.length, reserve: reserve.length, occupied: occupied.length }
-  }, [visibleSlots])
+    const conflicts = visibleSlots.filter((r) => { const c = conflictMap.get(r.id); return c && (c.room || c.group || c.teacher || c.assistant) })
+    return { real: real.length, reserve: reserve.length, occupied: occupied.length, conflicts: conflicts.length }
+  }, [visibleSlots, conflictMap])
 
   async function remove(id) {
     setBusy(true)
     try { await deleteSchedule(id); setConfirmDel(null); await load() }
     catch (e) { setErr(e.message) }
-    finally { setBusy(false) }
-  }
-
-  // Перетаскивание занятия (п.13-14 ТЗ) — на другой день и/или другое
-  // время, с сохранением длительности. Перед показом подтверждения
-  // проверяем конфликты той же RPC, что и форма редактирования — если
-  // конфликт есть, вообще не даём перенести (п.14: «Перенос невозможен»).
-  async function requestMove(id, newWeekday, newStartTime) {
-    const slot = slots.find((s) => s.id === id)
-    if (!slot) return
-    const durMin = toMin(slot.end_time) - toMin(slot.start_time)
-    const newStart = newStartTime ?? slot.start_time.slice(0, 5)
-    const newEnd = fromMin(toMin(newStart) + durMin)
-    if (slot.weekday === newWeekday && newStart === slot.start_time.slice(0, 5)) return
-
-    const isReal = slot.status === 'confirmed' || slot.status === 'confirmed_special'
-    try {
-      const conflicts = await checkScheduleConflicts({
-        office: slot.office, room: slot.room, teacherId: isReal ? slot.teacher_id : null,
-        weekday: newWeekday, startTime: newStart, endTime: newEnd,
-        activeFrom: slot.active_from, activeTo: slot.active_to || null, excludeId: id,
-      })
-      if (conflicts.length > 0) {
-        const c = conflicts[0]
-        setErr(c.kind === 'room'
-          ? `Перенос невозможен: кабинет ${c.room} уже занят ${c.group_name ? `«${c.group_name}»` : 'резервом'} в это время.`
-          : `Перенос невозможен: преподаватель ${c.teacher_name} уже занят в это время.`)
-        return
-      }
-    } catch (e) { setErr(e.message); return }
-
-    setConfirmMove({
-      id, weekday: newWeekday, startTime: newStart, endTime: newEnd,
-      oldLabel: `${WD.find((w) => w.n === slot.weekday)?.t}, ${fmtHM(slot.start_time)}`,
-      newLabel: `${WD.find((w) => w.n === newWeekday)?.t}, ${newStart}`,
-    })
-  }
-
-  async function confirmTheMove() {
-    if (!confirmMove) return
-    const slot = slots.find((s) => s.id === confirmMove.id)
-    if (!slot) { setConfirmMove(null); return }
-    setBusy(true); setErr('')
-    try {
-      await saveScheduleSlot(confirmMove.id, {
-        office: slot.office, room: slot.room, groupId: slot.group_id, teacherId: slot.teacher_id,
-        assistantId: slot.assistant_id, weekday: confirmMove.weekday, startTime: confirmMove.startTime, endTime: confirmMove.endTime,
-        lessonsCount: slot.lessons_count, status: slot.status, activeFrom: slot.active_from, activeTo: slot.active_to,
-        notes: slot.notes,
-      })
-      setConfirmMove(null)
-      await load()
-    } catch (e) { setErr('Не удалось изменить расписание: ' + e.message) }
     finally { setBusy(false) }
   }
 
@@ -220,7 +245,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
       День: WD.find((w) => w.n === r.weekday)?.t, Время: `${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`,
     })))
     addSheet(wb, 'По преподавателям', teacherRows)
-    XLSX.writeFile(wb, `Расписание_${office || 'все_офисы'}_${weekStart}.xlsx`)
+    XLSX.writeFile(wb, `Расписание_${office}_${weekStart}.xlsx`)
     setExcelOpen(false)
   }
 
@@ -244,56 +269,74 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         }
       `}</style>
 
-      <div className="rowflex no-print" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 160 }}>
+      <div className="rowflex no-print" style={{ marginBottom: 10, gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 130 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Расписание</h1>
-          <p style={{ margin: '2px 0 0', fontSize: 12.5, color: C.slate }}>{fmtDate(weekStart)} — {fmtDate(weekEnd)}</p>
         </div>
+
+        {/* Офис — главный переключатель контекста (п.13,40 ТЗ): один
+            офис = одно рабочее расписание. Только он и определяет, что
+            видно; «Все офисы» здесь никогда не появляется. */}
+        {lockedOffice ? (
+          <span className="rowflex" style={{ gap: 6, padding: '9px 14px', background: C.brandSoft, borderRadius: 10, fontSize: 13.5, fontWeight: 800, color: C.brand }}>
+            {lockedOffice}
+          </span>
+        ) : (
+          <select value={office} onChange={(e) => changeOffice(e.target.value)}
+            style={{ ...selSty, padding: '9px 14px', fontSize: 13.5, fontWeight: 800, color: C.brand, background: C.brandSoft, border: `1.5px solid ${C.brand}` }}>
+            {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        )}
+
         <div className="rowflex" style={{ gap: 6 }}>
           <button onClick={() => setRefDate(addDaysStr(refDate, -7))} style={navBtn} title="Предыдущая неделя"><ChevronLeft size={16} /></button>
-          <button onClick={() => setRefDate(todayStr())} style={{ ...navBtn, width: 'auto', padding: '0 12px', fontSize: 12.5, fontWeight: 700 }}>Сегодня</button>
+          <span style={{ fontSize: 12.5, color: C.slate, fontWeight: 600, minWidth: 128, textAlign: 'center' }}>{fmtDate(weekStart)} — {fmtDate(weekEnd)}</span>
           <button onClick={() => setRefDate(addDaysStr(refDate, 7))} style={navBtn} title="Следующая неделя"><ChevronRight size={16} /></button>
+          <button onClick={() => setRefDate(todayStr())} style={{ ...navBtn, width: 'auto', padding: '0 12px', fontSize: 12.5, fontWeight: 700 }}>Сегодня</button>
         </div>
-        {isAdmin && (
-          <>
-            <button onClick={() => setImportOpen(true)} className="rowflex"
-              style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              <Upload size={15} /> Импорт
-            </button>
-            <button onClick={() => setGen(true)} className="rowflex"
-              style={{ gap: 6, padding: '8px 14px', background: C.teal, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-              <Zap size={15} /> Создать занятия
-            </button>
-          </>
-        )}
-        {canEditSlots && (
-          <button onClick={() => setEditSlot(lockedOffice ? { office: lockedOffice } : 'new')} className="rowflex"
-            style={{ gap: 6, padding: '8px 14px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-            <Plus size={16} /> Добавить занятие
-          </button>
-        )}
-        <div style={{ position: 'relative' }}>
-          <button onClick={() => setExcelOpen((v) => !v)} className="rowflex"
-            style={{ gap: 6, padding: '8px 14px', background: C.ok, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-            <Download size={15} /> Excel
-          </button>
-          {excelOpen && (
-            <div style={{ position: 'absolute', right: 0, top: '110%', background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: '0 8px 24px rgba(20,24,58,.15)', zIndex: 20, minWidth: 180 }}>
-              <div onClick={exportXlsx} style={{ padding: '10px 14px', fontSize: 13, cursor: 'pointer' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = C.grey} onMouseLeave={(e) => e.currentTarget.style.background = '#fff'}>
-                Скачать (3 листа)
-              </div>
-            </div>
+
+        <div className="rowflex" style={{ gap: 8, marginLeft: 'auto' }}>
+          {isAdmin && (
+            <>
+              <button onClick={() => setImportOpen(true)} className="rowflex"
+                style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                <Upload size={15} /> Импорт
+              </button>
+              <button onClick={() => setGen(true)} className="rowflex"
+                style={{ gap: 6, padding: '8px 14px', background: C.teal, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                <Zap size={15} /> Создать занятия
+              </button>
+            </>
           )}
+          {canEditSlots && (
+            <button onClick={() => setEditSlot('new')} className="rowflex"
+              style={{ gap: 6, padding: '8px 14px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+              <Plus size={16} /> Добавить занятие
+            </button>
+          )}
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setExcelOpen((v) => !v)} className="rowflex"
+              style={{ gap: 6, padding: '8px 14px', background: C.ok, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+              <Download size={15} /> Excel
+            </button>
+            {excelOpen && (
+              <div style={{ position: 'absolute', right: 0, top: '110%', background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: '0 8px 24px rgba(20,24,58,.15)', zIndex: 20, minWidth: 180 }}>
+                <div onClick={exportXlsx} style={{ padding: '10px 14px', fontSize: 13, cursor: 'pointer' }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = C.grey} onMouseLeave={(e) => e.currentTarget.style.background = '#fff'}>
+                  Скачать (3 листа)
+                </div>
+              </div>
+            )}
+          </div>
+          <button onClick={() => window.print()} className="rowflex" title="Печать текущего расписания"
+            style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            <Printer size={15} /> Печать
+          </button>
+          <button onClick={toggleFullscreen} className="rowflex" title={fullscreen ? 'Выйти из полноэкранного режима' : 'На весь экран'}
+            style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            <Maximize2 size={15} /> <span className="hide-sm">{fullscreen ? 'Свернуть' : 'Во весь экран'}</span>
+          </button>
         </div>
-        <button onClick={() => window.print()} className="rowflex" title="Печать текущего расписания"
-          style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-          <Printer size={15} /> Печать
-        </button>
-        <button onClick={toggleFullscreen} className="rowflex" title={fullscreen ? 'Выйти из полноэкранного режима' : 'На весь экран'}
-          style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-          <Maximize2 size={15} /> <span className="hide-sm">{fullscreen ? 'Свернуть' : 'Во весь экран'}</span>
-        </button>
       </div>
 
       {err && <div className="no-print" style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
@@ -336,16 +379,6 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         )}
       </div>
       <div className="no-print rowflex" style={{ gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {lockedOffice ? (
-          <span className="rowflex" style={{ gap: 6, padding: '8px 14px', background: C.grey, borderRadius: 10, fontSize: 13, fontWeight: 700, color: C.ink }}>
-            Офис: {lockedOffice}
-          </span>
-        ) : (
-          <select value={office} onChange={(e) => { setOffice(e.target.value); setRoom('') }} style={selSty}>
-            <option value="">Все офисы</option>
-            {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
-        )}
         {mode === 'week' && (
           <select value={room} onChange={(e) => setRoom(e.target.value)} style={selSty}>
             <option value="">Все кабинеты</option>
@@ -365,7 +398,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
             </select>
             <select value={groupF} onChange={(e) => setGroupF(e.target.value)} style={selSty}>
               <option value="">Все группы</option>
-              {(dict.groups || []).filter((g) => !office || g.office === office).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              {(dict.groups || []).filter((g) => g.office === office).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </>
         )}
@@ -381,6 +414,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
           <span>Занятий: <b style={{ color: C.ink }}>{summary.real}</b></span>
           <span>Резерв: <b style={{ color: '#166534' }}>{summary.reserve}</b></span>
           <span>Занято (другой центр): <b style={{ color: C.slate }}>{summary.occupied}</b></span>
+          <span>Конфликтов: <b style={{ color: summary.conflicts ? '#dc2626' : C.ink }}>{summary.conflicts}</b></span>
         </div>
       )}
 
@@ -392,10 +426,10 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         <TeachersMode slots={visibleSlots} dict={dict} onOpen={(s) => setEditSlot(s)} />
       ) : mode === 'list' ? (
         <ScheduleList
-          slots={visibleSlots} weekStart={weekStart} gradeOfSlot={gradeOfSlot}
+          slots={visibleSlots} weekStart={weekStart} gradeOfSlot={gradeOfSlot} conflictMap={conflictMap}
           onOpenSlot={(r) => setEditSlot(r)}
           canEditSlots={canEditSlots}
-          onAdd={() => setEditSlot(lockedOffice ? { office: lockedOffice } : 'new')}
+          onAdd={() => setEditSlot('new')}
         />
       ) : (
         <ScheduleGrid
@@ -406,32 +440,17 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
           setDayOffset={setDayOffset}
           canEditSlots={canEditSlots}
           gradeOfSlot={gradeOfSlot}
+          conflictMap={conflictMap}
           onOpenSlot={(r) => setEditSlot(r)}
           onCreateAt={(weekday, time) => setEditSlot({
-            weekday, office: office || lockedOffice || OFFICES[0],
-            start_time: time, end_time: fromMin(toMin(time) + 80),
+            weekday, start_time: time, end_time: fromMin(toMin(time) + 80),
           })}
         />
       )}
 
-      {confirmMove && (
-        <div onClick={() => setConfirmMove(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 90 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 380, padding: 22 }}>
-            <h3 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 800 }}>Перенести занятие?</h3>
-            <p style={{ fontSize: 13.5, color: C.slate, margin: '0 0 16px', lineHeight: 1.6 }}>
-              Было: <b style={{ color: C.ink }}>{confirmMove.oldLabel}</b><br />
-              Станет: <b style={{ color: C.brand }}>{confirmMove.newLabel}</b>
-            </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setConfirmMove(null)} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Отмена</button>
-              <button onClick={confirmTheMove} disabled={busy} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? '…' : 'Перенести'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {editSlot && (
-        <SlotModal slot={editSlot} dict={dict} roomOptions={roomOptions} lockedOffice={lockedOffice}
+        <SlotModal slot={editSlot} dict={dict} roomOptions={roomOptions} pageOffice={office} lockedOffice={lockedOffice}
+          canTransferOffice={isAdmin}
           onClose={() => setEditSlot(null)}
           onSaved={async () => { setEditSlot(null); await load() }}
           onDelete={(id) => { setEditSlot(null); setConfirmDel(id) }} />
@@ -453,68 +472,104 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
       )}
 
       {importOpen && (
-        <ImportWizard dict={dict} onClose={() => setImportOpen(false)} onDone={async () => { setImportOpen(false); await load() }} />
+        <ImportWizard dict={dict} initialOffice={office} onClose={() => setImportOpen(false)} onDone={async () => { setImportOpen(false); await load() }} />
       )}
     </div>
   )
 }
 
-// ================= ТАБЛИЦА-СЕТКА (главный рабочий экран, ТЗ v2) =================
-// Принцип (взамен провалившейся v1 с «дорожками»): это НАСТОЯЩАЯ таблица —
-// строки — реальные времена начала занятий (плюс базовая часовая сетка
-// «для ориентира»), столбцы — дни. Одновременные занятия одного дня —
-// НОРМАЛЬНОЕ явление (разные кабинеты) и никогда не сужают карточки:
-// они складываются друг под другом внутри своей ячейки (flex-column),
-// а сама ячейка растёт по высоте. Ширина карточки всегда полная и
-// читаемая. Настоящий конфликт (тот же кабинет ИЛИ тот же преподаватель
-// при пересечении времени) не «решается» вёрсткой — он явно помечается
-// значком «⚠ Конфликт» прямо на карточке, карточка при этом не исчезает
-// и не теряет читаемость.
-function computeConflictIds(daySlots) {
-  const ids = new Set()
-  for (let i = 0; i < daySlots.length; i++) {
-    for (let j = i + 1; j < daySlots.length; j++) {
-      const a = daySlots[i], b = daySlots[j]
-      const aStart = toMin(a.start_time), aEnd = toMin(a.end_time)
-      const bStart = toMin(b.start_time), bEnd = toMin(b.end_time)
-      if (!(aStart < bEnd && bStart < aEnd)) continue // нет пересечения по времени
-      const sameRoom = a.room && b.room && a.room === b.room
-      const aReal = a.status === 'confirmed' || a.status === 'confirmed_special'
-      const bReal = b.status === 'confirmed' || b.status === 'confirmed_special'
-      const sameTeacher = aReal && bReal && a.teacher_id && b.teacher_id && a.teacher_id === b.teacher_id
-      if (sameRoom || sameTeacher) { ids.add(a.id); ids.add(b.id) }
+// ================= СЕТКА (проекция по реальному времени, ТЗ v3) =================
+// Высота и позиция карточки строго пропорциональны реальному времени
+// занятия (top/height считаются из start_time/end_time в минутах —
+// НЕ из округления до часа/строки). Пересечения одного дня — НОРМАЛЬНОЕ
+// явление (разные кабинеты одного офиса) и никогда не сжимают карточку
+// ниже читаемого минимума: максимум MAX_LANES карточек кладутся рядом
+// (каждая — 100/MAX_LANES % ширины), а всё, что не помещается, уходит
+// в один явный «+N занятий», раскрывающийся списком по клику.
+const PX_PER_MIN = 1.6
+const MAX_LANES = 2
+
+function layoutDay(items) {
+  const sorted = [...items].sort((a, b) => toMin(a.start_time) - toMin(b.start_time) || toMin(a.end_time) - toMin(b.end_time))
+  // Кластеры — максимальные цепочки транзитивно пересекающихся занятий.
+  // Считаем ширину/дорожки ОТДЕЛЬНО для каждого кластера, а не для дня
+  // целиком — иначе одно случайное 6-кратное наложение в 14:00 сжимало
+  // бы совершенно не пересекающуюся карточку в 8:00 (была ровно эта
+  // ошибка в предыдущей версии сетки).
+  const clusters = []
+  let cur = [], curEnd = -1
+  sorted.forEach((it) => {
+    const s = toMin(it.start_time), e = toMin(it.end_time)
+    if (cur.length && s >= curEnd) { clusters.push(cur); cur = [] }
+    cur.push(it)
+    curEnd = cur.length === 1 ? e : Math.max(curEnd, e)
+  })
+  if (cur.length) clusters.push(cur)
+
+  const placed = []
+  const overflow = []
+  clusters.forEach((cluster) => {
+    const laneEnds = []
+    const withLane = cluster.map((it) => {
+      const s = toMin(it.start_time), e = toMin(it.end_time)
+      let lane = laneEnds.findIndex((end) => end <= s)
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(e) } else laneEnds[lane] = e
+      return { ...it, _lane: lane }
+    })
+    const totalLanes = laneEnds.length
+    if (totalLanes <= MAX_LANES) {
+      withLane.forEach((it) => placed.push({ ...it, _lanes: totalLanes || 1 }))
+    } else {
+      // MAX_LANES-1 карточек показываем нормально, остальное — в overflow
+      // на месте последней дорожки (никогда не сужаем меньше 100/MAX_LANES%).
+      withLane.forEach((it) => {
+        if (it._lane < MAX_LANES - 1) placed.push({ ...it, _lanes: MAX_LANES })
+      })
+      const hidden = withLane.filter((it) => it._lane >= MAX_LANES - 1)
+      if (hidden.length) {
+        overflow.push({
+          start: Math.min(...hidden.map((it) => toMin(it.start_time))),
+          end: Math.max(...hidden.map((it) => toMin(it.end_time))),
+          lane: MAX_LANES - 1, lanes: MAX_LANES, items: hidden,
+        })
+      }
     }
-  }
-  return ids
+  })
+  return { placed, overflow }
 }
 
-function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, canEditSlots, gradeOfSlot, onOpenSlot, onCreateAt }) {
+function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, canEditSlots, gradeOfSlot, conflictMap, onOpenSlot, onCreateAt }) {
+  const [overflowOpen, setOverflowOpen] = useState(null) // { items }
   const maxOffset = Math.max(0, 7 - dayCount)
   const offset = Math.min(dayOffset, maxOffset)
   useEffect(() => { if (offset !== dayOffset) setDayOffset(offset) }, [offset])
   const visibleDays = WD.slice(offset, offset + dayCount)
   const todayStrVal = todayStr()
 
-  // Строки таблицы: реальные времена начала занятий + базовая часовая
-  // сетка с 8:00 до 20:00 «для ориентира» на пустых днях.
-  const rows = useMemo(() => {
-    const set = new Set()
-    for (let h = 8; h <= 20; h++) set.add(`${String(h).padStart(2, '0')}:00`)
-    slots.forEach((s) => set.add(fmtHM(s.start_time)))
-    return [...set].sort((a, b) => toMin(a) - toMin(b))
+  const { gridStartMin, gridEndMin } = useMemo(() => {
+    let mn = 8 * 60, mx = 21 * 60
+    if (slots.length) {
+      mn = Math.min(mn, Math.floor(Math.min(...slots.map((s) => toMin(s.start_time))) / 60) * 60)
+      mx = Math.max(mx, Math.ceil(Math.max(...slots.map((s) => toMin(s.end_time))) / 60) * 60)
+    }
+    return { gridStartMin: mn, gridEndMin: mx }
   }, [slots])
+  const gridHeight = (gridEndMin - gridStartMin) * PX_PER_MIN
+  const hourMarks = []
+  for (let m = gridStartMin; m <= gridEndMin; m += 60) hourMarks.push(m)
 
   const byDay = useMemo(() => {
     const m = {}
-    WD.forEach((w) => { m[w.n] = [] })
-    slots.forEach((s) => { (m[s.weekday] ||= []).push(s) })
+    WD.forEach((w) => { m[w.n] = layoutDay(slots.filter((s) => s.weekday === w.n)) })
     return m
   }, [slots])
-  const conflictIdsByDay = useMemo(() => {
-    const m = {}
-    Object.entries(byDay).forEach(([wd, arr]) => { m[wd] = computeConflictIds(arr) })
-    return m
-  }, [byDay])
+
+  function yToTime(y) {
+    let mins = gridStartMin + y / PX_PER_MIN
+    mins = Math.round(mins / 10) * 10
+    mins = Math.max(gridStartMin, Math.min(gridEndMin - 10, mins))
+    return fromMin(mins)
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -528,89 +583,139 @@ function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, can
         </div>
       )}
       <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'auto', background: '#fff', flex: 1, minHeight: 0 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `70px repeat(${visibleDays.length}, minmax(200px, 1fr))`, minWidth: 70 + visibleDays.length * 200 }}>
-          <div style={{ position: 'sticky', top: 0, left: 0, zIndex: 5, background: '#fff', borderBottom: `1px solid ${C.line}`, borderRight: `1px solid ${C.line}` }} />
+        <div style={{ display: 'grid', gridTemplateColumns: `54px repeat(${visibleDays.length}, minmax(180px, 1fr))`, minWidth: 54 + visibleDays.length * 180 }}>
+          <div style={{ position: 'sticky', top: 0, left: 0, zIndex: 4, background: '#fff', borderBottom: `1px solid ${C.line}`, height: 46 }} />
           {visibleDays.map((w, i) => {
             const dateStr = addDaysStr(weekStart, w.n - 1)
             const isToday = dateStr === todayStrVal
             return (
               <div key={w.n} style={{
-                position: 'sticky', top: 0, zIndex: 4, background: isToday ? C.brandSoft : '#fff',
-                borderBottom: `1px solid ${C.line}`, borderLeft: i > 0 ? `1px solid ${C.line}` : 'none', padding: '8px 6px', textAlign: 'center',
+                position: 'sticky', top: 0, zIndex: 3, background: isToday ? C.brandSoft : '#fff',
+                borderBottom: `1px solid ${C.line}`, borderLeft: `1px solid ${C.line}`, padding: '6px 4px', textAlign: 'center', height: 46,
               }}>
-                <div style={{ fontSize: 12.5, fontWeight: 800, color: isToday ? C.brand : C.ink }}>{w.t}</div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: isToday ? C.brand : C.slate, textTransform: 'uppercase', letterSpacing: 0.3 }}>{w.s}</div>
                 <div style={{ fontSize: 11, color: isToday ? C.brand : C.faint, fontWeight: isToday ? 700 : 400 }}>{dateStr.slice(8, 10)}.{dateStr.slice(5, 7)}</div>
               </div>
             )
           })}
 
-          {rows.map((time) => (
-            <React.Fragment key={time}>
-              <div style={{ position: 'sticky', left: 0, zIndex: 2, background: '#fff', borderRight: `1px solid ${C.line}`, borderTop: `1px solid ${C.line}`, padding: '6px 6px', fontSize: 11, color: C.faint, fontWeight: 700, whiteSpace: 'nowrap' }}>{time}</div>
-              {visibleDays.map((w, i) => {
-                const dateStr = addDaysStr(weekStart, w.n - 1)
-                const isToday = dateStr === todayStrVal
-                const items = (byDay[w.n] || []).filter((s) => fmtHM(s.start_time) === time)
-                const conflictIds = conflictIdsByDay[w.n] || new Set()
-                const empty = items.length === 0
-                return (
-                  <div key={w.n}
-                    onClick={() => { if (canEditSlots && empty) onCreateAt(w.n, time) }}
-                    style={{
-                      borderTop: `1px solid ${C.line}`, borderLeft: i > 0 ? `1px solid ${C.line}` : 'none',
-                      background: isToday ? 'rgba(67,56,202,.03)' : '#fff', padding: 4, minHeight: 38,
-                      cursor: canEditSlots && empty ? 'pointer' : 'default', display: 'flex', flexDirection: 'column', gap: 4,
-                    }}>
-                    {items.map((r) => (
-                      <LessonCard key={r.id} r={r} grade={gradeOfSlot(r)} conflict={conflictIds.has(r.id)} onClick={() => onOpenSlot(r)} />
-                    ))}
-                  </div>
-                )
-              })}
-            </React.Fragment>
-          ))}
+          <div style={{ position: 'sticky', left: 0, zIndex: 2, background: '#fff', borderRight: `1px solid ${C.line}` }}>
+            <div style={{ position: 'relative', height: gridHeight }}>
+              {hourMarks.map((m) => (
+                <div key={m} style={{ position: 'absolute', top: (m - gridStartMin) * PX_PER_MIN - 7, right: 5, fontSize: 10.5, color: C.faint }}>{fromMin(m)}</div>
+              ))}
+            </div>
+          </div>
+
+          {visibleDays.map((w, i) => {
+            const dateStr = addDaysStr(weekStart, w.n - 1)
+            const isToday = dateStr === todayStrVal
+            const { placed, overflow } = byDay[w.n] || { placed: [], overflow: [] }
+            return (
+              <div key={w.n}
+                onClick={(e) => {
+                  if (!canEditSlots) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  onCreateAt(w.n, yToTime(e.clientY - rect.top))
+                }}
+                style={{
+                  position: 'relative', borderLeft: `1px solid ${C.line}`, height: gridHeight,
+                  background: isToday ? 'rgba(67,56,202,.035)' : '#fff', cursor: canEditSlots ? 'pointer' : 'default',
+                }}>
+                {hourMarks.map((m) => (
+                  <div key={m} style={{ position: 'absolute', top: (m - gridStartMin) * PX_PER_MIN, left: 0, right: 0, borderTop: `1px solid ${C.line}`, pointerEvents: 'none' }} />
+                ))}
+                {placed.map((r) => {
+                  const top = (toMin(r.start_time) - gridStartMin) * PX_PER_MIN
+                  const height = Math.max(24, (toMin(r.end_time) - toMin(r.start_time)) * PX_PER_MIN - 2)
+                  const widthPct = 100 / r._lanes
+                  const leftPct = r._lane * widthPct
+                  return (
+                    <LessonCard key={r.id} r={r} grade={gradeOfSlot(r)} conflict={conflictMap.get(r.id)}
+                      onClick={() => onOpenSlot(r)}
+                      style={{ position: 'absolute', top, height, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, boxSizing: 'border-box' }} />
+                  )
+                })}
+                {overflow.map((ov, i2) => {
+                  const top = (ov.start - gridStartMin) * PX_PER_MIN
+                  const height = Math.max(24, (ov.end - ov.start) * PX_PER_MIN - 2)
+                  const widthPct = 100 / ov.lanes
+                  const leftPct = ov.lane * widthPct
+                  return (
+                    <div key={i2} onClick={(e) => { e.stopPropagation(); setOverflowOpen(ov.items) }}
+                      style={{
+                        position: 'absolute', top, height, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, boxSizing: 'border-box',
+                        background: C.grey, border: `1.5px dashed ${C.faint}`, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 12, fontWeight: 800, color: C.slate, cursor: 'pointer',
+                      }}>
+                      +{ov.items.length} занятия
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
         </div>
       </div>
-    </div>
-  )
-}
 
-function LessonCard({ r, grade, conflict, onClick }) {
-  const m = STATUS_META[r.status] || STATUS_META.confirmed
-  const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
-  return (
-    <div onClick={(e) => { e.stopPropagation(); onClick() }}
-      title={isReal
-        ? `${r.group_name}${grade ? ` (${grade} кл)` : ''} · ${(r.subject_name || '').split(' / ')[0]} · ${r.teacher_name || '—'}${r.assistant_name ? ` · асс. ${r.assistant_name}` : ''} · каб. ${r.room} · ${r.office} · ${r.students_count ?? ''} уч. · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}${conflict ? ' · ⚠ КОНФЛИКТ' : ''}`
-        : `${m.label} · каб. ${r.room} · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`}
-      style={{ background: m.bg, border: `1.5px solid ${conflict ? '#dc2626' : m.border}`, borderRadius: 8, padding: '6px 8px', cursor: 'pointer', minWidth: 0 }}>
-      <div className="rowflex" style={{ gap: 6, marginBottom: 2 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: m.color }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</span>
-        {conflict && (
-          <span className="rowflex" style={{ gap: 3, fontSize: 10, fontWeight: 800, color: '#dc2626', marginLeft: 'auto' }}>
-            <AlertTriangle size={11} /> Конфликт
-          </span>
-        )}
-      </div>
-      {isReal ? (
-        <>
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, overflowWrap: 'break-word' }}>
-            {grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade}кл </span>}{r.group_name}
+      {overflowOpen && (
+        <div onClick={() => setOverflowOpen(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 90 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 420, padding: 20, maxHeight: '80vh', overflow: 'auto' }}>
+            <div className="rowflex" style={{ marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 15.5, fontWeight: 800 }}>Занятия в это время ({overflowOpen.length})</h3>
+              <button onClick={() => setOverflowOpen(null)} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: C.slate, cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {overflowOpen.map((r) => (
+                <div key={r.id} onClick={() => { onOpenSlot(r); setOverflowOpen(null) }} style={{ padding: '10px 12px', background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, cursor: 'pointer' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.slate }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)} · каб. {r.room}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 800 }}>{r.group_name || STATUS_META[r.status]?.label}</div>
+                  {r.teacher_name && <div style={{ fontSize: 12, color: C.slate }}>{r.teacher_name}</div>}
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: C.slate, overflowWrap: 'break-word' }}>{(r.subject_name || '').split(' / ')[0]}</div>
-          <div style={{ fontSize: 11, color: C.slate, overflowWrap: 'break-word' }}>{r.teacher_name || '—'} · каб.{r.room}</div>
-        </>
-      ) : (
-        <div style={{ fontSize: 11.5, fontWeight: 800, color: m.color }}>{m.label} · каб.{r.room}</div>
+        </div>
       )}
     </div>
   )
 }
 
-// ================= РЕЖИМ «СПИСОК» (ТЗ v2, п.6) =================
+function LessonCard({ r, grade, conflict, onClick, style }) {
+  const m = STATUS_META[r.status] || STATUS_META.confirmed
+  const isReal = isRealStatus(r.status)
+  const hasConflict = !!(conflict && (conflict.room || conflict.group || conflict.teacher || conflict.assistant))
+  const label = conflictLabel(conflict)
+  return (
+    <div onClick={(e) => { e.stopPropagation(); onClick() }}
+      title={isReal
+        ? `${r.group_name}${grade ? ` (${grade} кл)` : ''} · ${(r.subject_name || '').split(' / ')[0]} · ${r.teacher_name || '—'}${r.assistant_name ? ` · асс. ${r.assistant_name}` : ''} · каб. ${r.room} · ${r.office} · ${r.students_count ?? ''} уч. · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}${label ? ` · ⚠ ${label}` : ''}`
+        : `${m.label} · каб. ${r.room} · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`}
+      style={{ ...style, background: m.bg, border: `1.5px solid ${hasConflict ? '#dc2626' : m.border}`, borderRadius: 7, padding: '3px 6px', overflow: 'hidden', cursor: 'pointer' }}>
+      <div style={{ fontSize: 9.5, fontWeight: 700, color: m.color, whiteSpace: 'nowrap' }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</div>
+      {isReal ? (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 800, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade}кл </span>}{r.group_name}
+          </div>
+          <div style={{ fontSize: 9.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.teacher_name || '—'} · каб.{r.room}</div>
+        </>
+      ) : (
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: m.color }}>{m.label}</div>
+      )}
+      {hasConflict && (
+        <div className="rowflex" style={{ gap: 3, fontSize: 9, fontWeight: 800, color: '#dc2626', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <AlertTriangle size={9} /> {label}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ================= РЕЖИМ «СПИСОК» =================
 // Полная альтернатива сетке — хронологический список по дням, карточки
 // на всю ширину, всегда полноразмерные и читаемые.
-function ScheduleList({ slots, weekStart, gradeOfSlot, onOpenSlot, canEditSlots, onAdd }) {
+function ScheduleList({ slots, weekStart, gradeOfSlot, conflictMap, onOpenSlot, canEditSlots, onAdd }) {
   const byDay = useMemo(() => {
     const m = {}
     WD.forEach((w) => { m[w.n] = [] })
@@ -618,11 +723,6 @@ function ScheduleList({ slots, weekStart, gradeOfSlot, onOpenSlot, canEditSlots,
     Object.keys(m).forEach((k) => { m[k].sort((a, b) => toMin(a.start_time) - toMin(b.start_time)) })
     return m
   }, [slots])
-  const conflictIdsByDay = useMemo(() => {
-    const m = {}
-    Object.entries(byDay).forEach(([wd, arr]) => { m[wd] = computeConflictIds(arr) })
-    return m
-  }, [byDay])
 
   const daysWithData = WD.filter((w) => (byDay[w.n] || []).length > 0)
   if (daysWithData.length === 0) {
@@ -644,7 +744,6 @@ function ScheduleList({ slots, weekStart, gradeOfSlot, onOpenSlot, canEditSlots,
           const dateStr = addDaysStr(weekStart, w.n - 1)
           const isToday = dateStr === todayStrVal
           const items = byDay[w.n]
-          const conflictIds = conflictIdsByDay[w.n] || new Set()
           return (
             <div key={w.n} className="sched-day">
               <div className="rowflex" style={{ gap: 8, marginBottom: 8 }}>
@@ -655,27 +754,29 @@ function ScheduleList({ slots, weekStart, gradeOfSlot, onOpenSlot, canEditSlots,
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {items.map((r) => {
                   const m = STATUS_META[r.status] || STATUS_META.confirmed
-                  const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
+                  const isReal = isRealStatus(r.status)
                   const grade = gradeOfSlot(r)
-                  const conflict = conflictIds.has(r.id)
+                  const conflict = conflictMap.get(r.id)
+                  const hasConflict = !!(conflict && (conflict.room || conflict.group || conflict.teacher || conflict.assistant))
+                  const label = conflictLabel(conflict)
                   return (
                     <div key={r.id} onClick={() => onOpenSlot(r)} className="rowflex"
-                      style={{ gap: 14, padding: '10px 14px', background: m.bg, border: `1.5px solid ${conflict ? '#dc2626' : m.border}`, borderRadius: 11, cursor: 'pointer', flexWrap: 'wrap' }}>
+                      style={{ gap: 14, padding: '10px 14px', background: m.bg, border: `1.5px solid ${hasConflict ? '#dc2626' : m.border}`, borderRadius: 11, cursor: 'pointer', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 13, fontWeight: 800, color: m.color, minWidth: 100 }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</span>
                       {isReal ? (
                         <>
                           <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>{grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade}кл </span>}{r.group_name}</span>
                           <span style={{ fontSize: 12.5, color: C.slate }}>{(r.subject_name || '').split(' / ')[0]}</span>
                           <span style={{ fontSize: 12.5, color: C.slate }}>{r.teacher_name || '—'}</span>
-                          <span style={{ fontSize: 12.5, color: C.faint }}>каб. {r.room} · {r.office}</span>
+                          <span style={{ fontSize: 12.5, color: C.faint }}>каб. {r.room}</span>
                           {r.students_count != null && <span style={{ fontSize: 12.5, color: C.faint }}>{r.students_count} уч.</span>}
                         </>
                       ) : (
-                        <span style={{ fontSize: 13, fontWeight: 800, color: m.color }}>{m.label} · каб. {r.room} · {r.office}</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: m.color }}>{m.label} · каб. {r.room}</span>
                       )}
-                      {conflict && (
+                      {hasConflict && (
                         <span className="rowflex" style={{ gap: 4, fontSize: 11.5, fontWeight: 800, color: '#dc2626', marginLeft: 'auto' }}>
-                          <AlertTriangle size={13} /> Конфликт
+                          <AlertTriangle size={13} /> {label}
                         </span>
                       )}
                     </div>
@@ -700,20 +801,19 @@ function GroupsMode({ slots, onOpen }) {
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   }, [slots, q])
 
-  if (slots.length === 0) return null
+  if (slots.length === 0) return <Empty text="В этом офисе пока нет занятий." />
   return (
     <div>
       <div style={{ marginBottom: 12 }}><SearchBox q={q} setQ={setQ} placeholder="Поиск группы…" /></div>
       {byGroup.length === 0 ? <Empty text="Группы не найдены." /> : (
         <div className="dt-wrap"><div className="dt-scroll"><table className="dt">
-          <thead><tr><th>Группа</th><th style={{ width: 110 }}>Офис</th><th>Кабинеты</th><th>Преподаватель</th><th>Дни</th><th>Время</th></tr></thead>
+          <thead><tr><th>Группа</th><th>Кабинеты</th><th>Преподаватель</th><th>Дни</th><th>Время</th></tr></thead>
           <tbody>
             {byGroup.map((g) => (
               <React.Fragment key={g.id}>
                 {g.rows.sort((a, b) => a.weekday - b.weekday).map((r, i) => (
                   <tr key={r.id} onClick={() => onOpen(r)} style={{ cursor: 'pointer' }}>
                     {i === 0 && <td rowSpan={g.rows.length} style={{ fontWeight: 700, verticalAlign: 'top' }}>{g.name}</td>}
-                    {i === 0 && <td rowSpan={g.rows.length} style={{ verticalAlign: 'top' }}>{g.office}</td>}
                     <td>{r.room}</td>
                     <td>{r.teacher_name || '—'}</td>
                     <td>{WD.find((w) => w.n === r.weekday)?.s}</td>
@@ -730,6 +830,8 @@ function GroupsMode({ slots, onOpen }) {
 }
 
 // ================= РЕЖИМ «ПО ПРЕПОДАВАТЕЛЯМ» =================
+// Показывает занятия преподавателя ТОЛЬКО в текущем офисе (п.28 ТЗ) — если
+// преподаватель работает и в других офисах, там нужно переключить офис.
 function TeachersMode({ slots, dict, onOpen }) {
   const [q, setQ] = useState('')
   const byTeacher = useMemo(() => {
@@ -739,7 +841,7 @@ function TeachersMode({ slots, dict, onOpen }) {
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   }, [slots, q])
 
-  if (slots.length === 0) return null
+  if (slots.length === 0) return <Empty text="В этом офисе пока нет занятий." />
   return (
     <div>
       <div style={{ marginBottom: 12 }}><SearchBox q={q} setQ={setQ} placeholder="Поиск преподавателя…" /></div>
@@ -749,14 +851,13 @@ function TeachersMode({ slots, dict, onOpen }) {
             <div key={t.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '12px 16px' }}>
               <div style={{ fontWeight: 800, fontSize: 14.5, marginBottom: 8 }}>{t.name}</div>
               <div className="dt-wrap"><div className="dt-scroll"><table className="dt">
-                <thead><tr><th style={{ width: 110 }}>День</th><th style={{ width: 110 }}>Время</th><th>Группа</th><th style={{ width: 100 }}>Офис</th><th style={{ width: 90 }}>Каб.</th></tr></thead>
+                <thead><tr><th style={{ width: 110 }}>День</th><th style={{ width: 110 }}>Время</th><th>Группа</th><th style={{ width: 90 }}>Каб.</th></tr></thead>
                 <tbody>
                   {t.rows.sort((a, b) => a.weekday - b.weekday || a.start_time.localeCompare(b.start_time)).map((r) => (
                     <tr key={r.id} onClick={() => onOpen(r)} style={{ cursor: 'pointer' }}>
                       <td>{WD.find((w) => w.n === r.weekday)?.t}</td>
                       <td>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</td>
                       <td style={{ fontWeight: 600 }}>{r.group_name}</td>
-                      <td>{r.office}</td>
                       <td>{r.room}</td>
                     </tr>
                   ))}
@@ -795,9 +896,16 @@ const navBtn = { width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.
 const selSty = { padding: '8px 10px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 12.5, outline: 'none', background: '#fff' }
 
 // ================= СОЗДАНИЕ / РЕДАКТИРОВАНИЕ СЛОТА =================
-function SlotModal({ slot, dict, roomOptions, lockedOffice, onClose, onSaved, onDelete }) {
+// Офис ЗАФИКСИРОВАН контекстом страницы (pageOffice/lockedOffice) — его
+// нельзя случайно поменять обычным редактированием (п.30-31 ТЗ). Перенос
+// в другой офис — отдельная явная операция с подтверждением, доступная
+// только тем, кто видит несколько офисов (canTransferOffice), и только
+// для уже существующего занятия.
+function SlotModal({ slot, dict, roomOptions, pageOffice, lockedOffice, canTransferOffice, onClose, onSaved, onDelete }) {
   const editing = slot !== 'new' && slot?.id
-  const [office, setOffice] = useState(lockedOffice || slot?.office || OFFICES[0])
+  const fixedOffice = lockedOffice || pageOffice
+  const [office, setOffice] = useState(editing ? slot.office : fixedOffice)
+  const [transferMode, setTransferMode] = useState(false)
   const [room, setRoom] = useState(slot?.room || '')
   const [groupId, setGroupId] = useState(slot?.group_id || '')
   const [teacherId, setTeacherId] = useState(slot?.teacher_id || '')
@@ -818,22 +926,23 @@ function SlotModal({ slot, dict, roomOptions, lockedOffice, onClose, onSaved, on
   const isReal = status === 'confirmed' || status === 'confirmed_special'
   const toggleDay = (n) => setDays((p) => p.includes(n) ? p.filter((x) => x !== n) : [...p, n])
 
-  // Живая проверка конфликта — по кабинету/времени/преподавателю, пока
-  // форма ещё заполняется (п.17-18 ТЗ), с небольшим дебаунсом.
+  // Живая проверка конфликта — по кабинету/группе/преподавателю/ассистенту,
+  // пока форма ещё заполняется, с небольшим дебаунсом.
   useEffect(() => {
     if (!office || !room || !startTime || !endTime || days.length === 0) { setConflicts([]); return }
     const t = setTimeout(() => {
       Promise.all(days.map((d) => checkScheduleConflicts({
-        office, room, teacherId: isReal ? (teacherId || null) : null, weekday: d,
+        office, room, teacherId: isReal ? (teacherId || null) : null, assistantId: isReal ? (assistantId || null) : null,
+        groupId: isReal ? (groupId || null) : null, weekday: d,
         startTime, endTime, activeFrom, activeTo: activeTo || null, excludeId: editing ? slot.id : null,
       }))).then((results) => setConflicts(results.flat())).catch(() => setConflicts([]))
     }, 350)
     return () => clearTimeout(t)
-  }, [office, room, teacherId, days, startTime, endTime, activeFrom, activeTo, isReal])
+  }, [office, room, teacherId, assistantId, groupId, days, startTime, endTime, activeFrom, activeTo, isReal])
 
   async function save() {
     setErr('')
-    if (!office || !room || !startTime || !endTime || days.length === 0) { setErr('Заполните офис, кабинет, время и хотя бы один день'); return }
+    if (!office || !room || !startTime || !endTime || days.length === 0) { setErr('Заполните кабинет, время и хотя бы один день'); return }
     if (isReal && (!groupId || !teacherId)) { setErr('Для подтверждённого занятия обязательны группа и преподаватель'); return }
     if (conflicts.length > 0) { setErr('Есть конфликт расписания — сначала устраните его'); return }
     setBusy(true)
@@ -875,13 +984,25 @@ function SlotModal({ slot, dict, roomOptions, lockedOffice, onClose, onSaved, on
 
         <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
-            <Label>Офис *</Label>
-            {lockedOffice ? (
-              <div style={{ ...inpSty, background: C.grey, display: 'flex', alignItems: 'center' }}>{lockedOffice}</div>
+            <Label>Офис</Label>
+            {transferMode ? (
+              <div className="rowflex" style={{ gap: 6 }}>
+                <select value={office} onChange={(e) => setOffice(e.target.value)} style={inpSty}>
+                  {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <button onClick={() => setTransferMode(false)} title="Готово"
+                  style={{ padding: '0 12px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', cursor: 'pointer' }}><Check size={16} /></button>
+              </div>
             ) : (
-              <select value={office} onChange={(e) => setOffice(e.target.value)} style={inpSty}>
-                {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
+              <div className="rowflex" style={{ gap: 8 }}>
+                <div style={{ ...inpSty, background: C.grey, flex: 1 }}>{office}</div>
+                {editing && !lockedOffice && canTransferOffice && (
+                  <button onClick={() => setTransferMode(true)} title="Перенести занятие в другой офис"
+                    style={{ padding: '0 10px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', color: C.slate, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    ⇄ В другой офис
+                  </button>
+                )}
+              </div>
             )}
           </div>
           <div style={{ flex: 1 }}>
@@ -965,9 +1086,10 @@ function SlotModal({ slot, dict, roomOptions, lockedOffice, onClose, onSaved, on
             {conflicts.map((c, i) => (
               <div key={i} className="rowflex" style={{ gap: 6 }}>
                 <AlertTriangle size={13} />
-                {c.kind === 'room'
-                  ? <span>Конфликт расписания. Кабинет {c.room} ({c.office}) уже занят {c.group_name ? `«${c.group_name}»` : STATUS_META.reserve.label.toLowerCase()} с {fmtHM(c.start_time)} до {fmtHM(c.end_time)}.</span>
-                  : <span>Преподаватель {c.teacher_name} уже занят с {fmtHM(c.start_time)} до {fmtHM(c.end_time)}.</span>}
+                {c.kind === 'room' && <span>Конфликт расписания. Кабинет {c.room} ({c.office}) уже занят {c.group_name ? `«${c.group_name}»` : STATUS_META.reserve.label.toLowerCase()} с {fmtHM(c.start_time)} до {fmtHM(c.end_time)}.</span>}
+                {c.kind === 'group' && <span>Группа {c.group_name} уже занята с {fmtHM(c.start_time)} до {fmtHM(c.end_time)} ({c.office}).</span>}
+                {c.kind === 'teacher' && <span>Преподаватель {c.teacher_name} уже занят в {c.office} с {fmtHM(c.start_time)} до {fmtHM(c.end_time)}.</span>}
+                {c.kind === 'assistant' && <span>Ассистент {c.assistant_name} уже занят в {c.office} с {fmtHM(c.start_time)} до {fmtHM(c.end_time)}.</span>}
               </div>
             ))}
           </div>
@@ -1037,7 +1159,7 @@ function GenerateModal({ onClose, onDone }) {
 // (смещённые заголовки, ФИЗ/МАТ вместо кода группы, опечатки в именах),
 // автоматический парсинг рисковал бы тихо создать неверные записи в живой
 // базе. Здесь группы/преподаватели ищутся по нормализованному сравнению,
-// несовпадения не создаются молча — их нужно разрешить вручную (п.5, 26 ТЗ).
+// несовпадения не создаются молча — их нужно разрешить вручную.
 const DAY_ALIASES = { 'пн': 1, 'понедельник': 1, 'вт': 2, 'вторник': 2, 'ср': 3, 'среда': 3, 'чт': 4, 'четверг': 4, 'пт': 5, 'пятница': 5, 'сб': 6, 'суббота': 6, 'вс': 7, 'воскресенье': 7 }
 function normName(s) {
   return (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ').replace(/[-–—]/g, '-')
@@ -1057,7 +1179,7 @@ function guessLang(groupName) {
 // слова, независимо от порядка «Имя Фамилия» / «Фамилия Имя» в базе.
 // Автоматически подставляем совпадение, ТОЛЬКО если оно единственное —
 // при неоднозначности (два тёзки с одинаковой буквой) оставляем на ручной
-// выбор, чтобы не назначить занятие не тому человеку (п.5 ТЗ).
+// выбор, чтобы не назначить занятие не тому человеку.
 function matchTeacherFuzzy(scheduleName, teachers) {
   const exactWanted = normName(scheduleName)
   const exact = teachers.find((t) => normName(t.full_name) === exactWanted)
@@ -1077,8 +1199,8 @@ function matchTeacherFuzzy(scheduleName, teachers) {
   return candidates.length === 1 ? candidates[0] : null
 }
 
-function ImportWizard({ dict, onClose, onDone }) {
-  const [office, setOffice] = useState(OFFICES[0])
+function ImportWizard({ dict, initialOffice, onClose, onDone }) {
+  const [office, setOffice] = useState(initialOffice || OFFICES[0])
   const [raw, setRaw] = useState('')
   const [rows, setRows] = useState(null) // после разбора/сопоставления
   const [teacherOverrides, setTeacherOverrides] = useState({}) // rowIndex -> teacher_id
