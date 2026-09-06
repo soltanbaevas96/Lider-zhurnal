@@ -81,6 +81,19 @@ export default function AttendancePicker({ groupId, lessonId, hasTest, onChange 
     setMarks((p) => ({ ...p, [id]: { ...p[id], reason } }))
   const setScore = (id, score) =>
     setMarks((p) => ({ ...p, [id]: { ...p[id], score } }))
+  // Массовые действия — чтобы не нажимать «Был» по одному на 20+ человек (п.13 ТЗ).
+  const setAll = (status) =>
+    setMarks((p) => {
+      const next = { ...p }
+      ;(students || []).forEach((s) => { next[s.id] = { ...next[s.id], status, reason: status === 'absent' ? next[s.id]?.reason : null } })
+      return next
+    })
+  const resetAll = () =>
+    setMarks((p) => {
+      const next = {}
+      ;(students || []).forEach((s) => { next[s.id] = { status: 'present', reason: null, score: '' } })
+      return next
+    })
 
   if (!groupId) return null
   if (err) return <div style={{ fontSize: 13, color: '#c2360b' }}>{err}</div>
@@ -110,6 +123,20 @@ export default function AttendancePicker({ groupId, lessonId, hasTest, onChange 
             </span>
           ))}
         </div>
+      </div>
+      <div className="rowflex" style={{ gap: 6, marginBottom: 8 }}>
+        <button type="button" onClick={() => setAll('present')}
+          style={{ padding: '4px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: `1px solid ${C.ok}`, background: C.okSoft, color: C.ok }}>
+          Все были
+        </button>
+        <button type="button" onClick={() => { if (confirm('Отметить всех как отсутствующих?')) setAll('absent') }}
+          style={{ padding: '4px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid #dc2626', background: '#fee2e2', color: '#dc2626' }}>
+          Все отсутствуют
+        </button>
+        <button type="button" onClick={() => { if (confirm('Сбросить всю посещаемость (статусы, причины, баллы) к значению по умолчанию?')) resetAll() }}
+          style={{ padding: '4px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: `1px solid ${C.line}`, background: '#fff', color: C.slate }}>
+          Сбросить
+        </button>
       </div>
 
       <div style={{ border: `1px solid ${C.line}`, borderRadius: 11, overflow: 'hidden', maxHeight: 340, overflowY: 'auto' }}>

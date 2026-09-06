@@ -101,9 +101,11 @@ export async function deleteLesson(id) {
 }
 
 // ---------- ФАЙЛЫ ПЛАНОВ (Storage) ----------
-export async function uploadPlan(file) {
+// teacherId обязателен — путь начинается с папки-преподавателя, чтобы
+// Storage-политики (миграция 65) могли ограничить доступ владельцем.
+export async function uploadPlan(file, teacherId) {
   const ext = file.name.split('.').pop()
-  const path = `${crypto.randomUUID()}.${ext}`
+  const path = `${teacherId}/${crypto.randomUUID()}.${ext}`
   const { error } = await supabase.storage.from('lesson-plans').upload(path, file)
   if (error) throw error
   return path // сохраняется в lessons.plan_path

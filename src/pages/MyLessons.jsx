@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Check, X, Clock, Wifi, RotateCcw, ArrowLeft, Ban,
+  CalendarDays, ChevronLeft, ChevronRight, Check, X, Clock, Wifi, RotateCcw, ArrowLeft, Ban, Paperclip, AlertTriangle,
 } from 'lucide-react'
-import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, fetchLessonTestInfo, conductLesson, cancelLesson } from '../lib/api'
+import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, fetchLessonTestInfo, conductLesson, cancelLesson, planUrl } from '../lib/api'
 import { ST, REASONS } from '../components/AttendancePicker'
-import { C } from '../lib/utils'
+import { C, todayStr, addDaysStr } from '../lib/utils'
 
 
 export default function MyLessons() {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  // todayStr()/addDaysStr() — локальные геттеры даты, не toISOString()
+  // (который переводит в UTC и в ночные часы по Казахстану показал бы
+  // вчерашний день — см. ТЗ про часовой пояс).
+  const [date, setDate] = useState(() => todayStr())
   const [rows, setRows] = useState(null)
   const [open, setOpen] = useState(null)   // занятие, которое проводим
   const [err, setErr] = useState('')
@@ -20,11 +23,8 @@ export default function MyLessons() {
   }
   useEffect(() => { load() }, [date])
 
-  const shift = (d) => {
-    const t = new Date(date); t.setDate(t.getDate() + d)
-    setDate(t.toISOString().slice(0, 10))
-  }
-  const isToday = date === new Date().toISOString().slice(0, 10)
+  const shift = (d) => setDate(addDaysStr(date, d))
+  const isToday = date === todayStr()
 
   if (open) {
     return <ConductCard lesson={open} onBack={() => setOpen(null)}
@@ -32,6 +32,9 @@ export default function MyLessons() {
   }
 
   const planned = (rows || []).filter((r) => r.status === 'planned')
+  const doneList = (rows || []).filter((r) => r.status === 'проведён')
+  const cancelledList = (rows || []).filter((r) => r.status === 'отменён')
+  const noPlanList = doneList.filter((r) => !r.plan_path)
 
   return (
     <div>
@@ -40,7 +43,6 @@ export default function MyLessons() {
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Мои занятия</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>
             {isToday ? 'Сегодня' : new Date(date).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
-            {planned.length > 0 && ` · ${planned.length} к проведению`}
           </p>
         </div>
         <div className="rowflex" style={{ gap: 6 }}>
@@ -49,11 +51,20 @@ export default function MyLessons() {
             style={{ padding: '7px 10px', border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, outline: 'none' }} />
           <button onClick={() => shift(1)} style={navBtn}><ChevronRight size={16} /></button>
           {!isToday && (
-            <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+            <button onClick={() => setDate(todayStr())}
               style={{ ...navBtn, width: 'auto', padding: '0 11px', fontSize: 12.5, fontWeight: 600 }}>Сегодня</button>
           )}
         </div>
       </div>
+
+      {rows !== null && rows.length > 0 && (
+        <div className="rowflex" style={{ gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
+          <MiniBadge n={planned.length} label="к проведению" color={C.brand} bg={C.brandSoft} />
+          <MiniBadge n={doneList.length} label="проведено" color={C.ok} bg={C.okSoft} />
+          <MiniBadge n={cancelledList.length} label="отменено" color={C.slate} bg={C.grey} />
+          {noPlanList.length > 0 && <MiniBadge n={noPlanList.length} label="без плана" color="#d97706" bg="#fef3c7" />}
+        </div>
+      )}
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
@@ -99,6 +110,18 @@ export default function MyLessons() {
                     </div>
                     {done && l.topic && (
                       <div style={{ fontSize: 12.5, color: C.faint, marginTop: 3 }}>Тема: {l.topic}</div>
+                    )}
+                    {done && (
+                      l.plan_path ? (
+                        <button onClick={async (e) => { e.stopPropagation(); const url = await planUrl(l.plan_path); if (url) window.open(url, '_blank') }}
+                          className="rowflex" style={{ gap: 4, marginTop: 4, fontSize: 11.5, color: C.ok, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 600 }}>
+                          <Paperclip size={11} /> план прикреплён
+                        </button>
+                      ) : (
+                        <span className="rowflex" style={{ gap: 4, marginTop: 4, fontSize: 11.5, color: '#d97706', fontWeight: 600 }}>
+                          <AlertTriangle size={11} /> нет плана
+                        </span>
+                      )
                     )}
                   </div>
 
@@ -166,6 +189,13 @@ function ConductCard({ lesson, onBack, onDone }) {
     setMarks((p) => ({ ...p, [id]: { ...p[id], reason } }))
   const setScore = (id, score) =>
     setMarks((p) => ({ ...p, [id]: { ...p[id], score } }))
+  // Массовые действия — не заставлять преподавателя жать «Был» по одному на 20+ учеников.
+  const setAllStatus = (status) =>
+    setMarks((p) => {
+      const next = { ...p }
+      ;(students || []).forEach((s) => { next[s.id] = { ...next[s.id], status, reason: status === 'absent' ? next[s.id]?.reason : null } })
+      return next
+    })
 
   async function save() {
     // проверка: у отсутствующих должна быть причина
@@ -269,6 +299,19 @@ function ConductCard({ lesson, onBack, onDone }) {
               {c.t}: {c.n}
             </span>
           ))}
+        </div>
+      )}
+
+      {students?.length > 0 && (
+        <div className="rowflex" style={{ gap: 6, marginBottom: 10 }}>
+          <button onClick={() => setAllStatus('present')}
+            style={{ padding: '5px 11px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: `1px solid ${C.ok}`, background: C.okSoft, color: C.ok }}>
+            Все были
+          </button>
+          <button onClick={() => { if (confirm('Отметить всех как отсутствующих?')) setAllStatus('absent') }}
+            style={{ padding: '5px 11px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid #dc2626', background: '#fee2e2', color: '#dc2626' }}>
+            Все отсутствуют
+          </button>
         </div>
       )}
 
@@ -389,4 +432,11 @@ const navBtn = {
 
 function Label({ children }) {
   return <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 6 }}>{children}</div>
+}
+function MiniBadge({ n, label, color, bg }) {
+  return (
+    <span style={{ fontSize: 12, fontWeight: 700, color, background: bg, padding: '5px 12px', borderRadius: 20 }}>
+      {n} {label}
+    </span>
+  )
 }

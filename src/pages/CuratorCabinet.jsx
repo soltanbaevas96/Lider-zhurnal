@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Search, X, Check, Trash2, Calendar, BookOpen, Users } from 'lucide-react'
+import { Plus, Search, X, Check, Trash2, Calendar, BookOpen, Users, ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   getMyCuratorId, createCuratorLesson, getCuratorLessons, deleteCuratorLesson, fetchAllStudents,
 } from '../lib/api'
-import { C, fmtDate, initials, avColorByIndex } from '../lib/utils'
+import { C, fmtDate, initials, avColorByIndex, currentMonth, monthRange, shiftMonthStr, monthLabelOf } from '../lib/utils'
 
 // Кабинет куратора: индивидуальные доп.занятия с отдельными учениками.
 export default function CuratorCabinet({ curator }) {
   const [curatorId, setCuratorId] = useState(curator?.id || null)
+  const [month, setMonth] = useState(currentMonth())
   const [lessons, setLessons] = useState(null)
   const [modal, setModal] = useState(false)
   const [err, setErr] = useState('')
@@ -17,16 +18,14 @@ export default function CuratorCabinet({ curator }) {
       const id = cid || curatorId || await getMyCuratorId()
       if (!curatorId) setCuratorId(id)
       if (!id) { setErr('Профиль куратора не найден'); return }
-      // текущий месяц
-      const now = new Date()
-      const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-      const to = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}`
+      const { from, to } = monthRange(month)
       setLessons(await getCuratorLessons(id, from, to))
     } catch (e) { setErr(e.message) }
   }
-  useEffect(() => { reload() }, [])
+  useEffect(() => { reload() }, [month])
 
   const totalLessons = (lessons || []).reduce((s, l) => s + (l.lessons_count || 0), 0)
+  const isCurrentMonth = month === currentMonth()
 
   return (
     <div>
@@ -34,6 +33,16 @@ export default function CuratorCabinet({ curator }) {
         <div style={{ flex: 1, minWidth: 200 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Мои занятия</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: C.slate }}>Индивидуальные занятия с учениками · {curator?.subject || 'куратор'}</p>
+        </div>
+        <div className="rowflex" style={{ gap: 6 }}>
+          <button onClick={() => setMonth((m) => shiftMonthStr(m, -1))} style={navBtn}><ChevronLeft size={16} /></button>
+          <span style={{ padding: '7px 12px', border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            {monthLabelOf(month)}
+          </span>
+          <button onClick={() => setMonth((m) => shiftMonthStr(m, 1))} style={navBtn}><ChevronRight size={16} /></button>
+          {!isCurrentMonth && (
+            <button onClick={() => setMonth(currentMonth())} style={{ ...navBtn, width: 'auto', padding: '0 11px', fontSize: 12.5, fontWeight: 600 }}>Текущий</button>
+          )}
         </div>
         <button onClick={() => setModal(true)} className="rowflex"
           style={{ gap: 7, padding: '10px 18px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
@@ -45,7 +54,8 @@ export default function CuratorCabinet({ curator }) {
 
       <div style={{ background: C.brandSoft, border: `1px solid ${C.brand}22`, borderRadius: 14, padding: '16px 20px', marginBottom: 16, display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <span style={{ fontSize: 30, fontWeight: 800, color: C.brand }}>{totalLessons}</span>
-        <span style={{ fontSize: 14, color: C.slate }}>уроков за месяц (для зарплаты)</span>
+        <span style={{ fontSize: 14, color: C.slate }}>уроков за {isCurrentMonth ? 'месяц' : monthLabelOf(month).toLowerCase()} (для зарплаты)</span>
+        <span style={{ marginLeft: 'auto', fontSize: 13, color: C.slate }}>Занятий: <b>{(lessons || []).length}</b></span>
       </div>
 
       {lessons === null ? (
@@ -87,7 +97,7 @@ function LessonModal({ curatorId, onClose, onDone }) {
   const [allStudents, setAllStudents] = useState([])
   const [selected, setSelected] = useState([]) // student objects
   const [q, setQ] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayStr())
   const [lessonsCount, setLessonsCount] = useState('2')
   const [topic, setTopic] = useState('')
   const [busy, setBusy] = useState(false)
@@ -179,3 +189,4 @@ function LessonModal({ curatorId, onClose, onDone }) {
 }
 
 const inp = { width: '100%', padding: '10px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 14, outline: 'none', boxSizing: 'border-box' }
+const navBtn = { width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.line}`, background: '#fff', color: C.slate, cursor: 'pointer', display: 'grid', placeItems: 'center' }

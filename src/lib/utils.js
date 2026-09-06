@@ -66,6 +66,15 @@ export function shiftMonthStr(month, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// 'YYYY-MM' -> «Сентябрь 2026» (единая функция — раньше был свой
+// приватный вариант внутри PeriodPicker.jsx, теперь общий).
+export function monthLabelOf(month) {
+  if (!month) return ''
+  const [y, m] = month.split('-').map(Number)
+  const s = new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
 // month 'YYYY-MM' -> { from, to } первого и последнего дня; 'all' -> null
 export function monthRange(month) {
   if (month === 'all') return null

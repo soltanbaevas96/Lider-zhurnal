@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { CalendarRange, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { C, monthOptions, shiftMonthStr } from '../lib/utils'
+import { C, monthOptions, shiftMonthStr, currentMonth, monthLabelOf } from '../lib/utils'
 import { inp } from './ui'
 
 // period: { mode: 'month'|'range'|'all'|'day'|'week', month?, from?, to? }
@@ -17,7 +17,7 @@ export default function PeriodPicker({ period, setPeriod }) {
         : period.mode === 'week'
           ? 'Эта неделя'
           : months.find((m) => m.v === period.month)?.label
-            ?? monthLabel(period.month)
+            ?? monthLabelOf(period.month)
             ?? 'Месяц'
 
   // стрелки работают только в режиме месяца
@@ -50,7 +50,7 @@ export default function PeriodPicker({ period, setPeriod }) {
                   { k: 'week', t: 'Эта неделя' },
                   { k: 'thismonth', t: 'Этот месяц' },
                 ].map((o) => {
-                  const thisMonth = new Date().toISOString().slice(0, 7)
+                  const thisMonth = currentMonth()
                   const active = o.k === 'thismonth'
                     ? (period.mode === 'month' && period.month === thisMonth)
                     : period.mode === o.k
@@ -72,7 +72,7 @@ export default function PeriodPicker({ period, setPeriod }) {
                 {months.map((m) => {
                   const active = (period.mode === 'month' && period.month === m.v)
                     || (m.v === 'all' && period.mode === 'all')
-                  const future = m.v !== 'all' && m.v > new Date().toISOString().slice(0, 7)
+                  const future = m.v !== 'all' && m.v > currentMonth()
                   return (
                     <button key={m.v}
                       onClick={() => { setPeriod(m.v === 'all' ? { mode: 'all' } : { mode: 'month', month: m.v }); setOpen(false) }}
@@ -115,15 +115,6 @@ function Title({ children }) {
       {children}
     </div>
   )
-}
-
-// Для месяцев вне списка (если ушли стрелками далеко)
-function monthLabel(m) {
-  if (!m) return null
-  const [y, mm] = m.split('-').map(Number)
-  const d = new Date(y, mm - 1, 1)
-  const s = d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
-  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 function RangeForm({ period, onApply }) {

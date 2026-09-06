@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { X, Paperclip, Trash2, Plus } from 'lucide-react'
-import { C } from '../lib/utils'
+import { C, todayStr } from '../lib/utils'
 import { inp, Field } from './ui'
 import { createLesson, updateLesson, deleteLesson, uploadPlan, saveAttendance } from '../lib/api'
 import AttendancePicker from './AttendancePicker'
@@ -10,7 +10,7 @@ import GroupSearchSelect from './GroupSearchSelect'
 // teacherId нужен для создания (чей урок).
 export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, onDeleted }) {
   const editing = !!lesson
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayStr()
   const [f, setF] = useState({
     group_id: lesson?.group_id || dict.groups[0]?.id || '',
     assistant_id: lesson?.assistant_id || '',
@@ -36,7 +36,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
     setSaving(true); setErr('')
     try {
       let plan_path = lesson?.plan_path ?? null
-      if (file) plan_path = await uploadPlan(file)
+      if (file) plan_path = await uploadPlan(file, teacherId)
       const payload = {
         group_id: f.group_id,
         assistant_id: f.assistant_id || null,

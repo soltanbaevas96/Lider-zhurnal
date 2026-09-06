@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Clock, CheckCircle2, FileText, Plus } from 'lucide-react'
-import { C, lessonCount } from '../lib/utils'
+import { Clock, CheckCircle2, FileText, Plus, Download } from 'lucide-react'
+import * as XLSX from 'xlsx'
+import { C, lessonCount, nameOf } from '../lib/utils'
 import { Stat } from '../components/ui'
 import PeriodPicker from '../components/PeriodPicker'
 import LessonTable from '../components/LessonTable'
@@ -29,6 +30,23 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
   const done = own.filter((l) => l.status === 'проведён')
   const myHours = done.reduce((s, l) => s + lessonCount(l), 0)
 
+  function exportXlsx() {
+    const groupOf = (id) => (dict.groups || []).find((g) => g.id === id)
+    const rows = [...own].sort((a, b) => b.lesson_date.localeCompare(a.lesson_date)).map((l) => {
+      const g = groupOf(l.group_id)
+      return {
+        Дата: l.lesson_date, Группа: g?.name || '', Предмет: (g?.subject_name || '').split(' / ')[0],
+        Учеников: l.students, Уроков: lessonCount(l),
+        Ассистент: l.assistant_id ? nameOf(dict.assistants, l.assistant_id) : '',
+        Статус: l.status, План: l.plan_path ? 'есть' : 'нет', Тема: l.topic || '',
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Журнал')
+    XLSX.writeFile(wb, `Журнал_${teacher.full_name}.xlsx`)
+  }
+
   return (
     <>
       <div className="rowflex" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
@@ -38,6 +56,10 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
         </div>
         <div className="rowflex" style={{ marginLeft: 'auto', gap: 10 }}>
           <PeriodPicker period={period} setPeriod={setPeriod} />
+          <button onClick={exportXlsx} disabled={!own.length} className="rowflex"
+            style={{ gap: 6, padding: '10px 14px', background: '#fff', color: own.length ? C.slate : C.faint, border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13.5, fontWeight: 700, cursor: own.length ? 'pointer' : 'default' }}>
+            <Download size={15} /> Excel
+          </button>
           <button onClick={() => setEditing('new')} className="rowflex" style={{ gap: 7, padding: '10px 17px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
             <Plus size={17} /> Добавить урок
           </button>
