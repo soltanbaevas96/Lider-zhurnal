@@ -139,7 +139,7 @@ export default function App() {
       `}</style>
 
       <header style={{ background: C.card, borderBottom: `1px solid ${C.line}`, position: 'sticky', top: 0, zIndex: 20 }}>
-        <div className="wrap rowflex" style={{ padding: '13px 16px', flexWrap: 'wrap' }}>
+        <div className="wrap rowflex" style={{ padding: '13px 16px', flexWrap: 'wrap', ...(scheduleFullBleed ? { maxWidth: 'none' } : {}) }}>
           <div className="rowflex" style={{ gap: 11 }}>
             <div style={{ width: 40, height: 40, borderRadius: 11, background: `linear-gradient(135deg,${C.brand},${C.brand2})`, display: 'grid', placeItems: 'center' }}>
               <GraduationCap size={23} color="#fff" />
@@ -167,7 +167,7 @@ export default function App() {
 
         {/* Навигация завуча / бухгалтера */}
         {canSeeFinance && (
-          <div className="wrap" style={{ paddingBottom: 0 }}>
+          <div className="wrap" style={{ paddingBottom: 0, ...(scheduleFullBleed ? { maxWidth: 'none' } : {}) }}>
             <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2 }}>
               {(isManager ? [
                 { k: 'dashboard', t: 'Дашборд', icon: LayoutDashboard },

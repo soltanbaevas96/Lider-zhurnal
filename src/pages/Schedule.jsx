@@ -55,7 +55,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
 
-  const [mode, setMode] = useState('week') // week | groups | teachers
+  const [mode, setMode] = useState('week') // week | list | groups | teachers
   const [office, setOffice] = useState(lockedOffice || '')
   const [room, setRoom] = useState('')
   const [grade, setGrade] = useState('')
@@ -63,14 +63,12 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const [groupF, setGroupF] = useState('')
   const [q, setQ] = useState('')
   const [refDate, setRefDate] = useState(() => todayStr())
-  const [now, setNow] = useState(() => new Date())
-
-  // Линия текущего времени (п.24 ТЗ) — обновляем раз в минуту, этого
-  // достаточно для сетки с шагом времени в минутах.
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60000)
-    return () => clearInterval(t)
-  }, [])
+  // Адаптивный показ дней (п.6, 49.1 ТЗ) — на узком экране/ноутбуке не
+  // нужно насильно втискивать все 7 дней, если из-за этого текст
+  // перестаёт читаться. dayOffset — с какого дня недели показываем,
+  // когда dayCount < 7 (переключается стрелками внутри самой сетки).
+  const [dayCount, setDayCount] = useState(7)
+  const [dayOffset, setDayOffset] = useState(0)
 
   const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, office } для нового с предзаполнением
   const [confirmDel, setConfirmDel] = useState(null)
@@ -322,11 +320,20 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
 
       {/* Режимы + фильтры */}
       <div className="no-print rowflex" style={{ gap: 7, marginBottom: 12, flexWrap: 'wrap' }}>
-        {[['week', 'Календарь'], ['groups', 'По группам'], ['teachers', 'По преподавателям']].map(([k, t]) => {
+        {[['week', 'Сетка'], ['list', 'Список'], ['groups', 'По группам'], ['teachers', 'По преподавателям']].map(([k, t]) => {
           const on = mode === k
           return <button key={k} onClick={() => setMode(k)}
             style={{ padding: '8px 15px', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.line}`, background: on ? C.brand : '#fff', color: on ? '#fff' : C.slate }}>{t}</button>
         })}
+        {mode === 'week' && (
+          <div style={{ display: 'flex', background: C.grey, borderRadius: 9, padding: 3, marginLeft: 6 }}>
+            {[[1, '1 день'], [3, '3 дня'], [7, 'Неделя']].map(([n, t]) => {
+              const on = dayCount === n
+              return <button key={n} onClick={() => { setDayCount(n); setDayOffset(0) }}
+                style={{ padding: '6px 12px', borderRadius: 7, fontSize: 12.5, fontWeight: 700, border: 'none', cursor: 'pointer', background: on ? '#fff' : 'transparent', color: on ? C.brand : C.slate, boxShadow: on ? '0 1px 3px rgba(20,24,58,.12)' : 'none' }}>{t}</button>
+            })}
+          </div>
+        )}
       </div>
       <div className="no-print rowflex" style={{ gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         {lockedOffice ? (
@@ -383,11 +390,20 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         <GroupsMode slots={visibleSlots} onOpen={(s) => setEditSlot(s)} />
       ) : mode === 'teachers' ? (
         <TeachersMode slots={visibleSlots} dict={dict} onOpen={(s) => setEditSlot(s)} />
+      ) : mode === 'list' ? (
+        <ScheduleList
+          slots={visibleSlots} weekStart={weekStart} gradeOfSlot={gradeOfSlot}
+          onOpenSlot={(r) => setEditSlot(r)}
+          canEditSlots={canEditSlots}
+          onAdd={() => setEditSlot(lockedOffice ? { office: lockedOffice } : 'new')}
+        />
       ) : (
-        <WeekTimeGrid
+        <ScheduleGrid
           slots={visibleSlots}
           weekStart={weekStart}
-          now={now}
+          dayCount={dayCount}
+          dayOffset={dayOffset}
+          setDayOffset={setDayOffset}
           canEditSlots={canEditSlots}
           gradeOfSlot={gradeOfSlot}
           onOpenSlot={(r) => setEditSlot(r)}
@@ -395,7 +411,6 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
             weekday, office: office || lockedOffice || OFFICES[0],
             start_time: time, end_time: fromMin(toMin(time) + 80),
           })}
-          onMove={(id, weekday, time) => requestMove(id, weekday, time)}
         />
       )}
 
@@ -444,161 +459,229 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   )
 }
 
-// ================= ВРЕМЕННАЯ СЕТКА (главный рабочий экран, п.2/8/9/10 ТЗ) =================
-// Слева — фиксированная колонка времени, справа — 7 дней. Занятие —
-// блок, чья высота и положение по вертикали пропорциональны реальному
-// времени (минуты, не округление до часа). Пересекающиеся по времени
-// занятия одного дня раскладываются по «дорожкам» (жадный алгоритм
-// интервального планирования), чтобы никогда не перекрывать друг друга
-// визуально. Пустая область дня кликабельна — создаёт занятие с уже
-// проставленными днём/временем (п.17-18 ТЗ); перетаскивание блока
-// переносит день/время с проверкой конфликтов перед подтверждением
-// (п.13-14 ТЗ).
-const PX_PER_MIN = 1.4
-const SNAP_MIN = 10
-const DAY_HEADER_H = 46
-
-function WeekTimeGrid({ slots, weekStart, now, canEditSlots, gradeOfSlot, onOpenSlot, onCreateAt, onMove }) {
-  const [dragId, setDragId] = useState(null)
-
-  const { gridStartMin, gridEndMin } = useMemo(() => {
-    let mn = 8 * 60, mx = 21 * 60
-    if (slots.length) {
-      mn = Math.min(mn, Math.floor(Math.min(...slots.map((s) => toMin(s.start_time))) / 60) * 60)
-      mx = Math.max(mx, Math.ceil(Math.max(...slots.map((s) => toMin(s.end_time))) / 60) * 60)
+// ================= ТАБЛИЦА-СЕТКА (главный рабочий экран, ТЗ v2) =================
+// Принцип (взамен провалившейся v1 с «дорожками»): это НАСТОЯЩАЯ таблица —
+// строки — реальные времена начала занятий (плюс базовая часовая сетка
+// «для ориентира»), столбцы — дни. Одновременные занятия одного дня —
+// НОРМАЛЬНОЕ явление (разные кабинеты) и никогда не сужают карточки:
+// они складываются друг под другом внутри своей ячейки (flex-column),
+// а сама ячейка растёт по высоте. Ширина карточки всегда полная и
+// читаемая. Настоящий конфликт (тот же кабинет ИЛИ тот же преподаватель
+// при пересечении времени) не «решается» вёрсткой — он явно помечается
+// значком «⚠ Конфликт» прямо на карточке, карточка при этом не исчезает
+// и не теряет читаемость.
+function computeConflictIds(daySlots) {
+  const ids = new Set()
+  for (let i = 0; i < daySlots.length; i++) {
+    for (let j = i + 1; j < daySlots.length; j++) {
+      const a = daySlots[i], b = daySlots[j]
+      const aStart = toMin(a.start_time), aEnd = toMin(a.end_time)
+      const bStart = toMin(b.start_time), bEnd = toMin(b.end_time)
+      if (!(aStart < bEnd && bStart < aEnd)) continue // нет пересечения по времени
+      const sameRoom = a.room && b.room && a.room === b.room
+      const aReal = a.status === 'confirmed' || a.status === 'confirmed_special'
+      const bReal = b.status === 'confirmed' || b.status === 'confirmed_special'
+      const sameTeacher = aReal && bReal && a.teacher_id && b.teacher_id && a.teacher_id === b.teacher_id
+      if (sameRoom || sameTeacher) { ids.add(a.id); ids.add(b.id) }
     }
-    return { gridStartMin: mn, gridEndMin: mx }
+  }
+  return ids
+}
+
+function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, canEditSlots, gradeOfSlot, onOpenSlot, onCreateAt }) {
+  const maxOffset = Math.max(0, 7 - dayCount)
+  const offset = Math.min(dayOffset, maxOffset)
+  useEffect(() => { if (offset !== dayOffset) setDayOffset(offset) }, [offset])
+  const visibleDays = WD.slice(offset, offset + dayCount)
+  const todayStrVal = todayStr()
+
+  // Строки таблицы: реальные времена начала занятий + базовая часовая
+  // сетка с 8:00 до 20:00 «для ориентира» на пустых днях.
+  const rows = useMemo(() => {
+    const set = new Set()
+    for (let h = 8; h <= 20; h++) set.add(`${String(h).padStart(2, '0')}:00`)
+    slots.forEach((s) => set.add(fmtHM(s.start_time)))
+    return [...set].sort((a, b) => toMin(a) - toMin(b))
   }, [slots])
-  const gridHeight = (gridEndMin - gridStartMin) * PX_PER_MIN
-  const hourMarks = []
-  for (let m = gridStartMin; m <= gridEndMin; m += 60) hourMarks.push(m)
 
   const byDay = useMemo(() => {
     const m = {}
     WD.forEach((w) => { m[w.n] = [] })
     slots.forEach((s) => { (m[s.weekday] ||= []).push(s) })
-    Object.keys(m).forEach((k) => {
-      const sorted = [...m[k]].sort((a, b) => toMin(a.start_time) - toMin(b.start_time) || toMin(a.end_time) - toMin(b.end_time))
-      const laneEnds = []
-      const placed = sorted.map((it) => {
-        let lane = laneEnds.findIndex((end) => end <= toMin(it.start_time))
-        if (lane === -1) { lane = laneEnds.length; laneEnds.push(toMin(it.end_time)) }
-        else laneEnds[lane] = toMin(it.end_time)
-        return { ...it, _lane: lane }
-      })
-      const totalLanes = laneEnds.length || 1
-      m[k] = placed.map((it) => ({ ...it, _totalLanes: totalLanes }))
-    })
     return m
   }, [slots])
-
-  const todayStrVal = todayStr()
-  const weekEndStr = addDaysStr(weekStart, 6)
-  const showNowLine = todayStrVal >= weekStart && todayStrVal <= weekEndStr
-  const nowMin = now.getHours() * 60 + now.getMinutes()
-
-  function yToTime(y) {
-    let mins = gridStartMin + y / PX_PER_MIN
-    mins = Math.round(mins / SNAP_MIN) * SNAP_MIN
-    mins = Math.max(gridStartMin, Math.min(gridEndMin - SNAP_MIN, mins))
-    return fromMin(mins)
-  }
+  const conflictIdsByDay = useMemo(() => {
+    const m = {}
+    Object.entries(byDay).forEach(([wd, arr]) => { m[wd] = computeConflictIds(arr) })
+    return m
+  }, [byDay])
 
   return (
-    <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'auto', background: '#fff', flex: 1, minHeight: 0 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '54px repeat(7, minmax(140px, 1fr))', minWidth: 980 }}>
-        <div style={{ position: 'sticky', top: 0, left: 0, zIndex: 4, background: '#fff', borderBottom: `1px solid ${C.line}`, height: DAY_HEADER_H }} />
-        {WD.map((w, i) => {
-          const dateStr = addDaysStr(weekStart, i)
-          const isToday = dateStr === todayStrVal
-          return (
-            <div key={w.n} style={{
-              position: 'sticky', top: 0, zIndex: 3, background: isToday ? C.brandSoft : '#fff',
-              borderBottom: `1px solid ${C.line}`, borderLeft: `1px solid ${C.line}`, padding: '6px 4px', textAlign: 'center', height: DAY_HEADER_H,
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: isToday ? C.brand : C.slate, textTransform: 'uppercase', letterSpacing: 0.3 }}>{w.s}</div>
-              <div style={{ fontSize: 11, color: isToday ? C.brand : C.faint, fontWeight: isToday ? 700 : 400 }}>{dateStr.slice(8, 10)}.{dateStr.slice(5, 7)}</div>
-            </div>
-          )
-        })}
-
-        <div style={{ position: 'sticky', left: 0, zIndex: 2, background: '#fff', borderRight: `1px solid ${C.line}` }}>
-          <div style={{ position: 'relative', height: gridHeight }}>
-            {hourMarks.map((m) => (
-              <div key={m} style={{ position: 'absolute', top: (m - gridStartMin) * PX_PER_MIN - 7, right: 5, fontSize: 10.5, color: C.faint }}>{fromMin(m)}</div>
-            ))}
-          </div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {dayCount < 7 && (
+        <div className="rowflex no-print" style={{ gap: 8, marginBottom: 8 }}>
+          <button onClick={() => setDayOffset(Math.max(0, offset - dayCount))} disabled={offset === 0} style={{ ...navBtn, opacity: offset === 0 ? 0.4 : 1 }} title="Предыдущие дни"><ChevronLeft size={14} /></button>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: C.slate }}>
+            {fmtDate(addDaysStr(weekStart, visibleDays[0].n - 1))} — {fmtDate(addDaysStr(weekStart, visibleDays[visibleDays.length - 1].n - 1))}
+          </span>
+          <button onClick={() => setDayOffset(Math.min(maxOffset, offset + dayCount))} disabled={offset === maxOffset} style={{ ...navBtn, opacity: offset === maxOffset ? 0.4 : 1 }} title="Следующие дни"><ChevronRight size={14} /></button>
         </div>
-
-        {WD.map((w, i) => {
-          const dateStr = addDaysStr(weekStart, i)
-          const isToday = dateStr === todayStrVal
-          const isPastDay = dateStr < todayStrVal
-          const items = byDay[w.n] || []
-          return (
-            <div key={w.n}
-              onClick={(e) => {
-                if (!canEditSlots) return
-                const rect = e.currentTarget.getBoundingClientRect()
-                onCreateAt(w.n, yToTime(e.clientY - rect.top))
-              }}
-              onDragOver={(e) => canEditSlots && e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault()
-                if (!canEditSlots || dragId == null) return
-                const rect = e.currentTarget.getBoundingClientRect()
-                onMove(dragId, w.n, yToTime(e.clientY - rect.top))
-                setDragId(null)
-              }}
-              style={{
-                position: 'relative', borderLeft: `1px solid ${C.line}`, height: gridHeight,
-                background: isToday ? 'rgba(67,56,202,.035)' : '#fff', cursor: canEditSlots ? 'pointer' : 'default',
+      )}
+      <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'auto', background: '#fff', flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `70px repeat(${visibleDays.length}, minmax(200px, 1fr))`, minWidth: 70 + visibleDays.length * 200 }}>
+          <div style={{ position: 'sticky', top: 0, left: 0, zIndex: 5, background: '#fff', borderBottom: `1px solid ${C.line}`, borderRight: `1px solid ${C.line}` }} />
+          {visibleDays.map((w, i) => {
+            const dateStr = addDaysStr(weekStart, w.n - 1)
+            const isToday = dateStr === todayStrVal
+            return (
+              <div key={w.n} style={{
+                position: 'sticky', top: 0, zIndex: 4, background: isToday ? C.brandSoft : '#fff',
+                borderBottom: `1px solid ${C.line}`, borderLeft: i > 0 ? `1px solid ${C.line}` : 'none', padding: '8px 6px', textAlign: 'center',
               }}>
-              {hourMarks.map((m) => (
-                <div key={m} style={{ position: 'absolute', top: (m - gridStartMin) * PX_PER_MIN, left: 0, right: 0, borderTop: `1px solid ${C.line}`, pointerEvents: 'none' }} />
-              ))}
-              {isToday && showNowLine && nowMin >= gridStartMin && nowMin <= gridEndMin && (
-                <div style={{ position: 'absolute', top: (nowMin - gridStartMin) * PX_PER_MIN, left: 0, right: 0, borderTop: '2px solid #dc2626', zIndex: 2, pointerEvents: 'none' }}>
-                  <span style={{ position: 'absolute', left: -4, top: -4, width: 8, height: 8, borderRadius: 4, background: '#dc2626' }} />
-                </div>
-              )}
-              {items.map((r) => {
-                const top = (toMin(r.start_time) - gridStartMin) * PX_PER_MIN
-                const height = Math.max(18, (toMin(r.end_time) - toMin(r.start_time)) * PX_PER_MIN - 2)
-                const widthPct = 100 / r._totalLanes
-                const leftPct = r._lane * widthPct
-                const m = STATUS_META[r.status] || STATUS_META.confirmed
-                const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
-                const isPast = isPastDay || (isToday && toMin(r.end_time) < nowMin)
-                const grade = gradeOfSlot(r)
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: isToday ? C.brand : C.ink }}>{w.t}</div>
+                <div style={{ fontSize: 11, color: isToday ? C.brand : C.faint, fontWeight: isToday ? 700 : 400 }}>{dateStr.slice(8, 10)}.{dateStr.slice(5, 7)}</div>
+              </div>
+            )
+          })}
+
+          {rows.map((time) => (
+            <React.Fragment key={time}>
+              <div style={{ position: 'sticky', left: 0, zIndex: 2, background: '#fff', borderRight: `1px solid ${C.line}`, borderTop: `1px solid ${C.line}`, padding: '6px 6px', fontSize: 11, color: C.faint, fontWeight: 700, whiteSpace: 'nowrap' }}>{time}</div>
+              {visibleDays.map((w, i) => {
+                const dateStr = addDaysStr(weekStart, w.n - 1)
+                const isToday = dateStr === todayStrVal
+                const items = (byDay[w.n] || []).filter((s) => fmtHM(s.start_time) === time)
+                const conflictIds = conflictIdsByDay[w.n] || new Set()
+                const empty = items.length === 0
                 return (
-                  <div key={r.id}
-                    draggable={canEditSlots}
-                    onDragStart={(e) => { e.stopPropagation(); setDragId(r.id) }}
-                    onClick={(e) => { e.stopPropagation(); onOpenSlot(r) }}
-                    title={isReal
-                      ? `${r.group_name}${grade ? ` (${grade} кл)` : ''} · ${(r.subject_name || '').split(' / ')[0]} · ${r.teacher_name || '—'}${r.assistant_name ? ` · асс. ${r.assistant_name}` : ''} · каб. ${r.room} · ${r.office} · ${r.students_count ?? ''} уч. · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`
-                      : `${m.label} · каб. ${r.room} · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`}
+                  <div key={w.n}
+                    onClick={() => { if (canEditSlots && empty) onCreateAt(w.n, time) }}
                     style={{
-                      position: 'absolute', top, height, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`,
-                      background: m.bg, border: `1px solid ${m.border}`, borderRadius: 6, padding: '2px 5px', overflow: 'hidden',
-                      cursor: 'pointer', opacity: isPast ? 0.55 : 1, zIndex: 1, boxSizing: 'border-box',
+                      borderTop: `1px solid ${C.line}`, borderLeft: i > 0 ? `1px solid ${C.line}` : 'none',
+                      background: isToday ? 'rgba(67,56,202,.03)' : '#fff', padding: 4, minHeight: 38,
+                      cursor: canEditSlots && empty ? 'pointer' : 'default', display: 'flex', flexDirection: 'column', gap: 4,
                     }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, color: m.color, whiteSpace: 'nowrap' }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</div>
-                    {isReal ? (
-                      <>
-                        <div style={{ fontSize: 11, fontWeight: 800, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade}кл </span>}{r.group_name}
-                        </div>
-                        {height > 36 && <div style={{ fontSize: 9.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(r.subject_name || '').split(' / ')[0]}</div>}
-                        {height > 48 && <div style={{ fontSize: 9.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.teacher_name || '—'} · каб.{r.room}</div>}
-                      </>
-                    ) : (
-                      <div style={{ fontSize: 10.5, fontWeight: 800, color: m.color }}>{m.label}</div>
-                    )}
+                    {items.map((r) => (
+                      <LessonCard key={r.id} r={r} grade={gradeOfSlot(r)} conflict={conflictIds.has(r.id)} onClick={() => onOpenSlot(r)} />
+                    ))}
                   </div>
                 )
               })}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LessonCard({ r, grade, conflict, onClick }) {
+  const m = STATUS_META[r.status] || STATUS_META.confirmed
+  const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
+  return (
+    <div onClick={(e) => { e.stopPropagation(); onClick() }}
+      title={isReal
+        ? `${r.group_name}${grade ? ` (${grade} кл)` : ''} · ${(r.subject_name || '').split(' / ')[0]} · ${r.teacher_name || '—'}${r.assistant_name ? ` · асс. ${r.assistant_name}` : ''} · каб. ${r.room} · ${r.office} · ${r.students_count ?? ''} уч. · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}${conflict ? ' · ⚠ КОНФЛИКТ' : ''}`
+        : `${m.label} · каб. ${r.room} · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`}
+      style={{ background: m.bg, border: `1.5px solid ${conflict ? '#dc2626' : m.border}`, borderRadius: 8, padding: '6px 8px', cursor: 'pointer', minWidth: 0 }}>
+      <div className="rowflex" style={{ gap: 6, marginBottom: 2 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: m.color }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</span>
+        {conflict && (
+          <span className="rowflex" style={{ gap: 3, fontSize: 10, fontWeight: 800, color: '#dc2626', marginLeft: 'auto' }}>
+            <AlertTriangle size={11} /> Конфликт
+          </span>
+        )}
+      </div>
+      {isReal ? (
+        <>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, overflowWrap: 'break-word' }}>
+            {grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade}кл </span>}{r.group_name}
+          </div>
+          <div style={{ fontSize: 11, color: C.slate, overflowWrap: 'break-word' }}>{(r.subject_name || '').split(' / ')[0]}</div>
+          <div style={{ fontSize: 11, color: C.slate, overflowWrap: 'break-word' }}>{r.teacher_name || '—'} · каб.{r.room}</div>
+        </>
+      ) : (
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: m.color }}>{m.label} · каб.{r.room}</div>
+      )}
+    </div>
+  )
+}
+
+// ================= РЕЖИМ «СПИСОК» (ТЗ v2, п.6) =================
+// Полная альтернатива сетке — хронологический список по дням, карточки
+// на всю ширину, всегда полноразмерные и читаемые.
+function ScheduleList({ slots, weekStart, gradeOfSlot, onOpenSlot, canEditSlots, onAdd }) {
+  const byDay = useMemo(() => {
+    const m = {}
+    WD.forEach((w) => { m[w.n] = [] })
+    slots.forEach((s) => { (m[s.weekday] ||= []).push(s) })
+    Object.keys(m).forEach((k) => { m[k].sort((a, b) => toMin(a.start_time) - toMin(b.start_time)) })
+    return m
+  }, [slots])
+  const conflictIdsByDay = useMemo(() => {
+    const m = {}
+    Object.entries(byDay).forEach(([wd, arr]) => { m[wd] = computeConflictIds(arr) })
+    return m
+  }, [byDay])
+
+  const daysWithData = WD.filter((w) => (byDay[w.n] || []).length > 0)
+  if (daysWithData.length === 0) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
+        <p style={{ color: C.slate, fontSize: 13.5, margin: canEditSlots ? '0 0 14px' : 0 }}>На эту неделю занятий нет.</p>
+        {canEditSlots && (
+          <button onClick={onAdd} style={{ padding: '9px 16px', background: C.brand, color: '#fff', border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Добавить занятие</button>
+        )}
+      </div>
+    )
+  }
+
+  const todayStrVal = todayStr()
+  return (
+    <div style={{ overflow: 'auto', flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {daysWithData.map((w) => {
+          const dateStr = addDaysStr(weekStart, w.n - 1)
+          const isToday = dateStr === todayStrVal
+          const items = byDay[w.n]
+          const conflictIds = conflictIdsByDay[w.n] || new Set()
+          return (
+            <div key={w.n} className="sched-day">
+              <div className="rowflex" style={{ gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: isToday ? C.brand : C.ink }}>{w.t}</span>
+                <span style={{ fontSize: 12.5, color: C.faint }}>{dateStr.slice(8, 10)}.{dateStr.slice(5, 7)}</span>
+                {isToday && <span style={{ fontSize: 11, fontWeight: 700, color: C.brand, background: C.brandSoft, padding: '2px 8px', borderRadius: 6 }}>Сегодня</span>}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {items.map((r) => {
+                  const m = STATUS_META[r.status] || STATUS_META.confirmed
+                  const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
+                  const grade = gradeOfSlot(r)
+                  const conflict = conflictIds.has(r.id)
+                  return (
+                    <div key={r.id} onClick={() => onOpenSlot(r)} className="rowflex"
+                      style={{ gap: 14, padding: '10px 14px', background: m.bg, border: `1.5px solid ${conflict ? '#dc2626' : m.border}`, borderRadius: 11, cursor: 'pointer', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: m.color, minWidth: 100 }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</span>
+                      {isReal ? (
+                        <>
+                          <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>{grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade}кл </span>}{r.group_name}</span>
+                          <span style={{ fontSize: 12.5, color: C.slate }}>{(r.subject_name || '').split(' / ')[0]}</span>
+                          <span style={{ fontSize: 12.5, color: C.slate }}>{r.teacher_name || '—'}</span>
+                          <span style={{ fontSize: 12.5, color: C.faint }}>каб. {r.room} · {r.office}</span>
+                          {r.students_count != null && <span style={{ fontSize: 12.5, color: C.faint }}>{r.students_count} уч.</span>}
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 13, fontWeight: 800, color: m.color }}>{m.label} · каб. {r.room} · {r.office}</span>
+                      )}
+                      {conflict && (
+                        <span className="rowflex" style={{ gap: 4, fontSize: 11.5, fontWeight: 800, color: '#dc2626', marginLeft: 'auto' }}>
+                          <AlertTriangle size={13} /> Конфликт
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )
         })}
