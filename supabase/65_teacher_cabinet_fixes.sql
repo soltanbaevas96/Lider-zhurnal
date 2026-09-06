@@ -26,7 +26,12 @@
 -- =====================================================================
 
 -- ---------- 1. get_my_lessons: добавить plan_path ----------
-create or replace function get_my_lessons(p_date date)
+-- CREATE OR REPLACE не может менять список колонок RETURNS TABLE —
+-- Postgres требует сначала удалить старую версию функции (иначе
+-- ошибка 42P13 "cannot change return type of existing function").
+drop function if exists get_my_lessons(date);
+
+create function get_my_lessons(p_date date)
 returns table(
   lesson_id uuid, group_id uuid, group_name text, subject_name text, office text,
   lesson_date date, lessons_count integer, topic text, status text,
