@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Plus, Trash2, Zap, X, AlertTriangle, ChevronLeft, ChevronRight,
-  Search, Download, Printer, Upload, Check,
+  Search, Download, Printer, Upload, Check, Maximize2,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import {
@@ -28,6 +28,10 @@ const STATUS_META = {
   occupied_other: { label: 'Занято — другой центр', color: '#4b5563', bg: '#eef0f4', border: '#c7cbd3' },
 }
 const fmtHM = (t) => (t || '').slice(0, 5)
+// 'HH:MM' -> минуты с начала суток, и обратно (с округлением до 5 минут —
+// достаточная точность для сетки, п.9 ТЗ: реальные времена, не только час).
+const toMin = (t) => { const [h, m] = (t || '0:0').slice(0, 5).split(':').map(Number); return h * 60 + (m || 0) }
+const fromMin = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
 
 // isAdmin — управляет только массовыми/системными действиями (Импорт,
 // «Создать занятия» пачкой). canEdit — обычный CRUD слотов (добавить/
@@ -35,8 +39,17 @@ const fmtHM = (t) => (t || '').slice(0, 5)
 // методист получает canEdit=true, isAdmin=false (свой офис, без массовых
 // инструментов). lockedOffice — если задан, офис не выбирается, а
 // зафиксирован (кабинет методиста — только его офис).
-export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
+export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullBleed }) {
   const canEditSlots = canEdit ?? isAdmin
+
+  // Расписание — единственный экран, которому нужна полная ширина окна
+  // (рабочая сетка методиста/завуча, п.3 ТЗ). Сообщаем об этом наверх,
+  // в App.jsx, и снимаем флаг при уходе со страницы.
+  useEffect(() => {
+    onFullBleed?.(true)
+    return () => onFullBleed?.(false)
+  }, [])
+
   const [slots, setSlots] = useState(null)
   const [missed, setMissed] = useState([])
   const [loading, setLoading] = useState(true)
@@ -46,17 +59,29 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
   const [office, setOffice] = useState(lockedOffice || '')
   const [room, setRoom] = useState('')
   const [grade, setGrade] = useState('')
+  const [teacherF, setTeacherF] = useState('')
+  const [groupF, setGroupF] = useState('')
   const [q, setQ] = useState('')
   const [refDate, setRefDate] = useState(() => todayStr())
+  const [now, setNow] = useState(() => new Date())
+
+  // Линия текущего времени (п.24 ТЗ) — обновляем раз в минуту, этого
+  // достаточно для сетки с шагом времени в минутах.
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60000)
+    return () => clearInterval(t)
+  }, [])
 
   const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, office } для нового с предзаполнением
   const [confirmDel, setConfirmDel] = useState(null)
   const [gen, setGen] = useState(false)
   const [excelOpen, setExcelOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-  const [dragId, setDragId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [fullscreen, setFullscreen] = useState(false)
+  const [confirmMove, setConfirmMove] = useState(null) // { id, weekday, startTime, endTime, oldLabel, newLabel }
+  const pageRef = useRef(null)
 
   const reqId = useRef(0)
   async function load() {
@@ -96,19 +121,21 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
       if (office && r.office !== office) return false
       if (room && r.room !== room) return false
       if (grade && gradeOfSlot(r) !== grade) return false
+      if (teacherF && r.teacher_id !== teacherF) return false
+      if (groupF && r.group_id !== groupF) return false
       if (r.active_from > weekEnd) return false
       if (r.active_to && r.active_to < weekStart) return false
       if (!s) return true
       return (r.group_name || '').toLowerCase().includes(s) || (r.teacher_name || '').toLowerCase().includes(s) || (r.room || '').toLowerCase().includes(s)
     })
-  }, [slots, office, room, grade, q, weekStart, weekEnd, dict.groups])
+  }, [slots, office, room, grade, teacherF, groupF, q, weekStart, weekEnd, dict.groups])
 
-  const byDay = useMemo(() => {
-    const m = {}
-    WD.forEach((w) => { m[w.n] = [] })
-    visibleSlots.forEach((r) => { (m[r.weekday] ||= []).push(r) })
-    Object.values(m).forEach((arr) => arr.sort((a, b) => a.start_time.localeCompare(b.start_time)))
-    return m
+  // Сводка сверху (п.43 ТЗ): «настоящих» занятий/резервов/занято по фильтру.
+  const summary = useMemo(() => {
+    const real = visibleSlots.filter((r) => r.status === 'confirmed' || r.status === 'confirmed_special')
+    const reserve = visibleSlots.filter((r) => r.status === 'reserve')
+    const occupied = visibleSlots.filter((r) => r.status === 'occupied_other')
+    return { real: real.length, reserve: reserve.length, occupied: occupied.length }
   }, [visibleSlots])
 
   async function remove(id) {
@@ -118,19 +145,56 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
     finally { setBusy(false) }
   }
 
-  async function moveToDay(id, newWeekday) {
+  // Перетаскивание занятия (п.13-14 ТЗ) — на другой день и/или другое
+  // время, с сохранением длительности. Перед показом подтверждения
+  // проверяем конфликты той же RPC, что и форма редактирования — если
+  // конфликт есть, вообще не даём перенести (п.14: «Перенос невозможен»).
+  async function requestMove(id, newWeekday, newStartTime) {
     const slot = slots.find((s) => s.id === id)
-    if (!slot || slot.weekday === newWeekday) return
+    if (!slot) return
+    const durMin = toMin(slot.end_time) - toMin(slot.start_time)
+    const newStart = newStartTime ?? slot.start_time.slice(0, 5)
+    const newEnd = fromMin(toMin(newStart) + durMin)
+    if (slot.weekday === newWeekday && newStart === slot.start_time.slice(0, 5)) return
+
+    const isReal = slot.status === 'confirmed' || slot.status === 'confirmed_special'
+    try {
+      const conflicts = await checkScheduleConflicts({
+        office: slot.office, room: slot.room, teacherId: isReal ? slot.teacher_id : null,
+        weekday: newWeekday, startTime: newStart, endTime: newEnd,
+        activeFrom: slot.active_from, activeTo: slot.active_to || null, excludeId: id,
+      })
+      if (conflicts.length > 0) {
+        const c = conflicts[0]
+        setErr(c.kind === 'room'
+          ? `Перенос невозможен: кабинет ${c.room} уже занят ${c.group_name ? `«${c.group_name}»` : 'резервом'} в это время.`
+          : `Перенос невозможен: преподаватель ${c.teacher_name} уже занят в это время.`)
+        return
+      }
+    } catch (e) { setErr(e.message); return }
+
+    setConfirmMove({
+      id, weekday: newWeekday, startTime: newStart, endTime: newEnd,
+      oldLabel: `${WD.find((w) => w.n === slot.weekday)?.t}, ${fmtHM(slot.start_time)}`,
+      newLabel: `${WD.find((w) => w.n === newWeekday)?.t}, ${newStart}`,
+    })
+  }
+
+  async function confirmTheMove() {
+    if (!confirmMove) return
+    const slot = slots.find((s) => s.id === confirmMove.id)
+    if (!slot) { setConfirmMove(null); return }
     setBusy(true); setErr('')
     try {
-      await saveScheduleSlot(id, {
+      await saveScheduleSlot(confirmMove.id, {
         office: slot.office, room: slot.room, groupId: slot.group_id, teacherId: slot.teacher_id,
-        assistantId: slot.assistant_id, weekday: newWeekday, startTime: slot.start_time, endTime: slot.end_time,
+        assistantId: slot.assistant_id, weekday: confirmMove.weekday, startTime: confirmMove.startTime, endTime: confirmMove.endTime,
         lessonsCount: slot.lessons_count, status: slot.status, activeFrom: slot.active_from, activeTo: slot.active_to,
         notes: slot.notes,
       })
+      setConfirmMove(null)
       await load()
-    } catch (e) { setErr(e.message) }
+    } catch (e) { setErr('Не удалось изменить расписание: ' + e.message) }
     finally { setBusy(false) }
   }
 
@@ -162,10 +226,21 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
     setExcelOpen(false)
   }
 
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) { pageRef.current?.requestFullscreen?.().catch(() => {}); setFullscreen(true) }
+    else { document.exitFullscreen?.().catch(() => {}); setFullscreen(false) }
+  }
+  useEffect(() => {
+    const onChange = () => setFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
   return (
-    <div>
+    <div ref={pageRef} style={{ display: 'flex', flexDirection: 'column', height: fullscreen ? '100vh' : 'calc(100vh - 132px)', minHeight: 480, background: fullscreen ? '#fff' : 'transparent', padding: fullscreen ? 16 : 0 }}>
       <style>{`
         @media print {
+          @page { size: landscape; }
           .no-print { display: none !important; }
           .sched-day { break-inside: avoid; }
         }
@@ -216,6 +291,10 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
         <button onClick={() => window.print()} className="rowflex" title="Печать текущего расписания"
           style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
           <Printer size={15} /> Печать
+        </button>
+        <button onClick={toggleFullscreen} className="rowflex" title={fullscreen ? 'Выйти из полноэкранного режима' : 'На весь экран'}
+          style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          <Maximize2 size={15} /> <span className="hide-sm">{fullscreen ? 'Свернуть' : 'Во весь экран'}</span>
         </button>
       </div>
 
@@ -271,12 +350,32 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
           <option value="10">10 класс</option>
           <option value="11">11 класс</option>
         </select>
+        {mode === 'week' && (
+          <>
+            <select value={teacherF} onChange={(e) => setTeacherF(e.target.value)} style={selSty}>
+              <option value="">Все преподаватели</option>
+              {(dict.teachers || []).map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+            </select>
+            <select value={groupF} onChange={(e) => setGroupF(e.target.value)} style={selSty}>
+              <option value="">Все группы</option>
+              {(dict.groups || []).filter((g) => !office || g.office === office).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </>
+        )}
         <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 200 }}>
           <Search size={15} color={C.faint} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)' }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск группы / преподавателя / кабинета…"
             style={{ width: '100%', padding: '8px 12px 8px 32px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13, outline: 'none' }} />
         </div>
       </div>
+
+      {mode === 'week' && !loading && (
+        <div className="no-print rowflex" style={{ gap: 14, marginBottom: 10, fontSize: 12.5, color: C.slate, flexWrap: 'wrap' }}>
+          <span>Занятий: <b style={{ color: C.ink }}>{summary.real}</b></span>
+          <span>Резерв: <b style={{ color: '#166534' }}>{summary.reserve}</b></span>
+          <span>Занято (другой центр): <b style={{ color: C.slate }}>{summary.occupied}</b></span>
+        </div>
+      )}
 
       {loading ? (
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
@@ -285,37 +384,33 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
       ) : mode === 'teachers' ? (
         <TeachersMode slots={visibleSlots} dict={dict} onOpen={(s) => setEditSlot(s)} />
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(190px, 1fr))', gap: 10, minWidth: 900 }}>
-            {WD.map((w) => {
-              const items = byDay[w.n] || []
-              return (
-                <div key={w.n} className="sched-day"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => { e.preventDefault(); if (dragId) moveToDay(dragId, w.n); setDragId(null) }}
-                  style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', minHeight: 120 }}>
-                  <div className="rowflex" style={{ background: C.grey, padding: '8px 12px', gap: 6 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 800, color: items.length ? C.ink : C.faint }}>{w.t}</span>
-                    <span style={{ color: C.faint, fontWeight: 600, fontSize: 12 }}>· {items.length}</span>
-                    {canEditSlots && (
-                      <button onClick={() => setEditSlot({ weekday: w.n, office: office || lockedOffice || OFFICES[0] })} title="Добавить в этот день"
-                        style={{ marginLeft: 'auto', border: 'none', background: 'none', color: C.brand, cursor: 'pointer', display: 'flex' }}>
-                        <Plus size={15} />
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ padding: items.length ? 6 : 16 }}>
-                    {items.length === 0 ? (
-                      <div style={{ fontSize: 12, color: C.faint, textAlign: 'center' }}>нет занятий</div>
-                    ) : items.map((r) => (
-                      <SlotCard key={r.id} r={r} grade={gradeOfSlot(r)} isAdmin={canEditSlots} draggable={canEditSlots}
-                        onDragStart={() => setDragId(r.id)}
-                        onClick={() => setEditSlot(r)} />
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
+        <WeekTimeGrid
+          slots={visibleSlots}
+          weekStart={weekStart}
+          now={now}
+          canEditSlots={canEditSlots}
+          gradeOfSlot={gradeOfSlot}
+          onOpenSlot={(r) => setEditSlot(r)}
+          onCreateAt={(weekday, time) => setEditSlot({
+            weekday, office: office || lockedOffice || OFFICES[0],
+            start_time: time, end_time: fromMin(toMin(time) + 80),
+          })}
+          onMove={(id, weekday, time) => requestMove(id, weekday, time)}
+        />
+      )}
+
+      {confirmMove && (
+        <div onClick={() => setConfirmMove(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 90 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 380, padding: 22 }}>
+            <h3 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 800 }}>Перенести занятие?</h3>
+            <p style={{ fontSize: 13.5, color: C.slate, margin: '0 0 16px', lineHeight: 1.6 }}>
+              Было: <b style={{ color: C.ink }}>{confirmMove.oldLabel}</b><br />
+              Станет: <b style={{ color: C.brand }}>{confirmMove.newLabel}</b>
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setConfirmMove(null)} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Отмена</button>
+              <button onClick={confirmTheMove} disabled={busy} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.brand, color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? '…' : 'Перенести'}</button>
+            </div>
           </div>
         </div>
       )}
@@ -349,24 +444,165 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice }) {
   )
 }
 
-// ================= КАРТОЧКА ЗАНЯТИЯ =================
-function SlotCard({ r, grade, isAdmin, draggable, onDragStart, onClick }) {
-  const m = STATUS_META[r.status] || STATUS_META.confirmed
-  const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
+// ================= ВРЕМЕННАЯ СЕТКА (главный рабочий экран, п.2/8/9/10 ТЗ) =================
+// Слева — фиксированная колонка времени, справа — 7 дней. Занятие —
+// блок, чья высота и положение по вертикали пропорциональны реальному
+// времени (минуты, не округление до часа). Пересекающиеся по времени
+// занятия одного дня раскладываются по «дорожкам» (жадный алгоритм
+// интервального планирования), чтобы никогда не перекрывать друг друга
+// визуально. Пустая область дня кликабельна — создаёт занятие с уже
+// проставленными днём/временем (п.17-18 ТЗ); перетаскивание блока
+// переносит день/время с проверкой конфликтов перед подтверждением
+// (п.13-14 ТЗ).
+const PX_PER_MIN = 1.4
+const SNAP_MIN = 10
+const DAY_HEADER_H = 46
+
+function WeekTimeGrid({ slots, weekStart, now, canEditSlots, gradeOfSlot, onOpenSlot, onCreateAt, onMove }) {
+  const [dragId, setDragId] = useState(null)
+
+  const { gridStartMin, gridEndMin } = useMemo(() => {
+    let mn = 8 * 60, mx = 21 * 60
+    if (slots.length) {
+      mn = Math.min(mn, Math.floor(Math.min(...slots.map((s) => toMin(s.start_time))) / 60) * 60)
+      mx = Math.max(mx, Math.ceil(Math.max(...slots.map((s) => toMin(s.end_time))) / 60) * 60)
+    }
+    return { gridStartMin: mn, gridEndMin: mx }
+  }, [slots])
+  const gridHeight = (gridEndMin - gridStartMin) * PX_PER_MIN
+  const hourMarks = []
+  for (let m = gridStartMin; m <= gridEndMin; m += 60) hourMarks.push(m)
+
+  const byDay = useMemo(() => {
+    const m = {}
+    WD.forEach((w) => { m[w.n] = [] })
+    slots.forEach((s) => { (m[s.weekday] ||= []).push(s) })
+    Object.keys(m).forEach((k) => {
+      const sorted = [...m[k]].sort((a, b) => toMin(a.start_time) - toMin(b.start_time) || toMin(a.end_time) - toMin(b.end_time))
+      const laneEnds = []
+      const placed = sorted.map((it) => {
+        let lane = laneEnds.findIndex((end) => end <= toMin(it.start_time))
+        if (lane === -1) { lane = laneEnds.length; laneEnds.push(toMin(it.end_time)) }
+        else laneEnds[lane] = toMin(it.end_time)
+        return { ...it, _lane: lane }
+      })
+      const totalLanes = laneEnds.length || 1
+      m[k] = placed.map((it) => ({ ...it, _totalLanes: totalLanes }))
+    })
+    return m
+  }, [slots])
+
+  const todayStrVal = todayStr()
+  const weekEndStr = addDaysStr(weekStart, 6)
+  const showNowLine = todayStrVal >= weekStart && todayStrVal <= weekEndStr
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+
+  function yToTime(y) {
+    let mins = gridStartMin + y / PX_PER_MIN
+    mins = Math.round(mins / SNAP_MIN) * SNAP_MIN
+    mins = Math.max(gridStartMin, Math.min(gridEndMin - SNAP_MIN, mins))
+    return fromMin(mins)
+  }
+
   return (
-    <div draggable={draggable} onDragStart={onDragStart} onClick={onClick}
-      style={{ background: m.bg, border: `1px solid ${m.border}`, borderRadius: 9, padding: '8px 10px', marginBottom: 6, cursor: 'pointer' }}>
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: m.color }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)} · каб. {r.room}</div>
-      {isReal ? (
-        <>
-          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, marginTop: 2 }}>
-            {grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade} кл · </span>}{r.group_name}
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'auto', background: '#fff', flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '54px repeat(7, minmax(140px, 1fr))', minWidth: 980 }}>
+        <div style={{ position: 'sticky', top: 0, left: 0, zIndex: 4, background: '#fff', borderBottom: `1px solid ${C.line}`, height: DAY_HEADER_H }} />
+        {WD.map((w, i) => {
+          const dateStr = addDaysStr(weekStart, i)
+          const isToday = dateStr === todayStrVal
+          return (
+            <div key={w.n} style={{
+              position: 'sticky', top: 0, zIndex: 3, background: isToday ? C.brandSoft : '#fff',
+              borderBottom: `1px solid ${C.line}`, borderLeft: `1px solid ${C.line}`, padding: '6px 4px', textAlign: 'center', height: DAY_HEADER_H,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: isToday ? C.brand : C.slate, textTransform: 'uppercase', letterSpacing: 0.3 }}>{w.s}</div>
+              <div style={{ fontSize: 11, color: isToday ? C.brand : C.faint, fontWeight: isToday ? 700 : 400 }}>{dateStr.slice(8, 10)}.{dateStr.slice(5, 7)}</div>
+            </div>
+          )
+        })}
+
+        <div style={{ position: 'sticky', left: 0, zIndex: 2, background: '#fff', borderRight: `1px solid ${C.line}` }}>
+          <div style={{ position: 'relative', height: gridHeight }}>
+            {hourMarks.map((m) => (
+              <div key={m} style={{ position: 'absolute', top: (m - gridStartMin) * PX_PER_MIN - 7, right: 5, fontSize: 10.5, color: C.faint }}>{fromMin(m)}</div>
+            ))}
           </div>
-          <div style={{ fontSize: 11.5, color: C.slate }}>{r.teacher_name || '—'}</div>
-        </>
-      ) : (
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: m.color, marginTop: 2 }}>{m.label}</div>
-      )}
+        </div>
+
+        {WD.map((w, i) => {
+          const dateStr = addDaysStr(weekStart, i)
+          const isToday = dateStr === todayStrVal
+          const isPastDay = dateStr < todayStrVal
+          const items = byDay[w.n] || []
+          return (
+            <div key={w.n}
+              onClick={(e) => {
+                if (!canEditSlots) return
+                const rect = e.currentTarget.getBoundingClientRect()
+                onCreateAt(w.n, yToTime(e.clientY - rect.top))
+              }}
+              onDragOver={(e) => canEditSlots && e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault()
+                if (!canEditSlots || dragId == null) return
+                const rect = e.currentTarget.getBoundingClientRect()
+                onMove(dragId, w.n, yToTime(e.clientY - rect.top))
+                setDragId(null)
+              }}
+              style={{
+                position: 'relative', borderLeft: `1px solid ${C.line}`, height: gridHeight,
+                background: isToday ? 'rgba(67,56,202,.035)' : '#fff', cursor: canEditSlots ? 'pointer' : 'default',
+              }}>
+              {hourMarks.map((m) => (
+                <div key={m} style={{ position: 'absolute', top: (m - gridStartMin) * PX_PER_MIN, left: 0, right: 0, borderTop: `1px solid ${C.line}`, pointerEvents: 'none' }} />
+              ))}
+              {isToday && showNowLine && nowMin >= gridStartMin && nowMin <= gridEndMin && (
+                <div style={{ position: 'absolute', top: (nowMin - gridStartMin) * PX_PER_MIN, left: 0, right: 0, borderTop: '2px solid #dc2626', zIndex: 2, pointerEvents: 'none' }}>
+                  <span style={{ position: 'absolute', left: -4, top: -4, width: 8, height: 8, borderRadius: 4, background: '#dc2626' }} />
+                </div>
+              )}
+              {items.map((r) => {
+                const top = (toMin(r.start_time) - gridStartMin) * PX_PER_MIN
+                const height = Math.max(18, (toMin(r.end_time) - toMin(r.start_time)) * PX_PER_MIN - 2)
+                const widthPct = 100 / r._totalLanes
+                const leftPct = r._lane * widthPct
+                const m = STATUS_META[r.status] || STATUS_META.confirmed
+                const isReal = r.status === 'confirmed' || r.status === 'confirmed_special'
+                const isPast = isPastDay || (isToday && toMin(r.end_time) < nowMin)
+                const grade = gradeOfSlot(r)
+                return (
+                  <div key={r.id}
+                    draggable={canEditSlots}
+                    onDragStart={(e) => { e.stopPropagation(); setDragId(r.id) }}
+                    onClick={(e) => { e.stopPropagation(); onOpenSlot(r) }}
+                    title={isReal
+                      ? `${r.group_name}${grade ? ` (${grade} кл)` : ''} · ${(r.subject_name || '').split(' / ')[0]} · ${r.teacher_name || '—'}${r.assistant_name ? ` · асс. ${r.assistant_name}` : ''} · каб. ${r.room} · ${r.office} · ${r.students_count ?? ''} уч. · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`
+                      : `${m.label} · каб. ${r.room} · ${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`}
+                    style={{
+                      position: 'absolute', top, height, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`,
+                      background: m.bg, border: `1px solid ${m.border}`, borderRadius: 6, padding: '2px 5px', overflow: 'hidden',
+                      cursor: 'pointer', opacity: isPast ? 0.55 : 1, zIndex: 1, boxSizing: 'border-box',
+                    }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, color: m.color, whiteSpace: 'nowrap' }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</div>
+                    {isReal ? (
+                      <>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {grade && <span style={{ color: C.slate, fontWeight: 600 }}>{grade}кл </span>}{r.group_name}
+                        </div>
+                        {height > 36 && <div style={{ fontSize: 9.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(r.subject_name || '').split(' / ')[0]}</div>}
+                        {height > 48 && <div style={{ fontSize: 9.5, color: C.slate, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.teacher_name || '—'} · каб.{r.room}</div>}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: m.color }}>{m.label}</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

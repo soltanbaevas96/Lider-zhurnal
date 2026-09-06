@@ -41,6 +41,12 @@ export default function App() {
   const [view, setView] = useState('dashboard') // dashboard | analytics | risks | payroll_timesheets | manage | student
   const [openStudent, setOpenStudent] = useState(null) // id ученика для карточки
   const [analyticsFilter, setAnalyticsFilter] = useState(null) // переход из Дашборда в Аналитику с готовым фильтром
+  // Расписание — единственная страница, которой нужна полная ширина экрана
+  // (рабочая сетка методиста/завуча). Сам компонент Schedule сообщает сюда,
+  // что сейчас смонтирован (через onFullBleed), независимо от того, открыт
+  // ли он через верхнюю навигацию или встроен в кабинет методиста —
+  // так оба места дают full-width без дублирования логики.
+  const [scheduleFullBleed, setScheduleFullBleed] = useState(false)
 
   const periodLabel = useMemo(() => periodLabelOf(period), [period])
 
@@ -206,7 +212,7 @@ export default function App() {
         )}
       </header>
 
-      <main className="wrap" style={{ padding: '20px 16px 64px' }}>
+      <main className="wrap" style={scheduleFullBleed ? { padding: '20px 24px 24px', maxWidth: 'none' } : { padding: '20px 16px 64px' }}>
         {error && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 14, borderRadius: 12, marginBottom: 16, fontSize: 14 }}>{error}</div>}
 
         {!dict ? (
@@ -224,7 +230,7 @@ export default function App() {
         ) : isManager && view === 'entbase' ? (
           <EntBase dict={dict} />
         ) : isManager && view === 'schedule' ? (
-          <Schedule dict={dict} isAdmin={isAdmin} />
+          <Schedule dict={dict} isAdmin={isAdmin} onFullBleed={setScheduleFullBleed} />
         ) : isManager && view === 'control' ? (
           <Control dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : canSeeFinance && view === 'payroll_timesheets' ? (
@@ -282,7 +288,7 @@ export default function App() {
             onOpenStudent={(id) => setOpenStudent(id)}
           />
         ) : isMethodist ? (
-          <MethodistCabinet dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
+          <MethodistCabinet dict={dict} onOpenStudent={(id) => setOpenStudent(id)} onScheduleFullBleed={setScheduleFullBleed} />
         ) : profile?.role === 'assistant' ? (
           <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 40, textAlign: 'center' }}>
             <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8 }}>

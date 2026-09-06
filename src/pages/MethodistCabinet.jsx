@@ -24,7 +24,7 @@ const WD_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 // (какие данные показывать/куда по умолчанию создавать новое), а не
 // ограничение доступа: доступ ко всем офисам уже разрешён на уровне
 // RLS (миграция 62), «Все офисы» тут всегда доступны.
-export default function MethodistCabinet({ dict, onOpenStudent }) {
+export default function MethodistCabinet({ dict, onOpenStudent, onScheduleFullBleed }) {
   const [tab, setTab] = useState('overview')
   const [officeFilter, setOfficeFilter] = useState('all')
   const [students, setStudents] = useState(null)
@@ -105,7 +105,7 @@ export default function MethodistCabinet({ dict, onOpenStudent }) {
       ) : tab === 'groups' ? (
         <GroupsTab officeFilter={officeFilter} groups={officeGroups} students={officeStudents} onChanged={reload} />
       ) : (
-        <Schedule dict={dict} isAdmin={false} canEdit lockedOffice={officeFilter === 'all' ? null : officeFilter} />
+        <Schedule dict={dict} isAdmin={false} canEdit lockedOffice={officeFilter === 'all' ? null : officeFilter} onFullBleed={onScheduleFullBleed} />
       )}
     </div>
   )
