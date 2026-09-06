@@ -2,12 +2,17 @@ import React, { useEffect, useState } from 'react'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Check, X, Clock, Wifi, RotateCcw, ArrowLeft, Ban, Paperclip, AlertTriangle,
 } from 'lucide-react'
-import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, fetchLessonTestInfo, conductLesson, cancelLesson, planUrl } from '../lib/api'
+import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, fetchLessonTestInfo, conductLesson, cancelLesson, planUrl, uploadPlan } from '../lib/api'
 import { ST, REASONS } from '../components/AttendancePicker'
 import { C, todayStr, addDaysStr } from '../lib/utils'
 
+const STATUS_META = {
+  planned: { label: 'Запланировано', color: C.brand, bg: C.brandSoft },
+  проведён: { label: 'Проведено', color: C.ok, bg: C.okSoft },
+  отменён: { label: 'Отменено', color: C.slate, bg: C.grey },
+}
 
-export default function MyLessons() {
+export default function MyLessons({ teacherId }) {
   // todayStr()/addDaysStr() — локальные геттеры даты, не toISOString()
   // (который переводит в UTC и в ночные часы по Казахстану показал бы
   // вчерашний день — см. ТЗ про часовой пояс).
@@ -26,8 +31,17 @@ export default function MyLessons() {
   const shift = (d) => setDate(addDaysStr(date, d))
   const isToday = date === todayStr()
 
+  // Фильтры «Моих занятий» (п.4 ТЗ) — только те, где реально есть выбор
+  // (если у преподавателя в этот день один офис/предмет/группа — фильтр
+  // просто не показываем, чтобы не перегружать интерфейс).
+  const [officeF, setOfficeF] = useState('all')
+  const [subjectF, setSubjectF] = useState('all')
+  const [groupF, setGroupF] = useState('all')
+  const [statusF, setStatusF] = useState('all')
+  const [attentionF, setAttentionF] = useState(null) // 'noplan' | 'notopic' | null
+
   if (open) {
-    return <ConductCard lesson={open} onBack={() => setOpen(null)}
+    return <ConductCard lesson={open} teacherId={teacherId} onBack={() => setOpen(null)}
       onDone={async () => { setOpen(null); await load() }} />
   }
 
@@ -35,6 +49,21 @@ export default function MyLessons() {
   const doneList = (rows || []).filter((r) => r.status === 'проведён')
   const cancelledList = (rows || []).filter((r) => r.status === 'отменён')
   const noPlanList = doneList.filter((r) => !r.plan_path)
+  const noTopicList = doneList.filter((r) => !r.topic?.trim())
+
+  const officeOptions = [...new Set((rows || []).map((r) => r.office).filter(Boolean))]
+  const subjectOptions = [...new Set((rows || []).map((r) => (r.subject_name || '').split(' / ')[0]).filter(Boolean))]
+  const groupOptions = [...new Set((rows || []).map((r) => r.group_name).filter(Boolean))]
+
+  const visibleRows = (rows || []).filter((r) => {
+    if (officeF !== 'all' && r.office !== officeF) return false
+    if (subjectF !== 'all' && (r.subject_name || '').split(' / ')[0] !== subjectF) return false
+    if (groupF !== 'all' && r.group_name !== groupF) return false
+    if (statusF !== 'all' && r.status !== statusF) return false
+    if (attentionF === 'noplan' && (r.status !== 'проведён' || r.plan_path)) return false
+    if (attentionF === 'notopic' && (r.status !== 'проведён' || r.topic?.trim())) return false
+    return true
+  })
 
   return (
     <div>
@@ -58,11 +87,49 @@ export default function MyLessons() {
       </div>
 
       {rows !== null && rows.length > 0 && (
-        <div className="rowflex" style={{ gap: 7, marginBottom: 14, flexWrap: 'wrap' }}>
-          <MiniBadge n={planned.length} label="к проведению" color={C.brand} bg={C.brandSoft} />
-          <MiniBadge n={doneList.length} label="проведено" color={C.ok} bg={C.okSoft} />
-          <MiniBadge n={cancelledList.length} label="отменено" color={C.slate} bg={C.grey} />
-          {noPlanList.length > 0 && <MiniBadge n={noPlanList.length} label="без плана" color="#d97706" bg="#fef3c7" />}
+        <div className="rowflex" style={{ gap: 7, marginBottom: 10, flexWrap: 'wrap' }}>
+          <MiniBadge n={planned.length} label="к проведению" color={C.brand} bg={C.brandSoft} onClick={() => setStatusF(statusF === 'planned' ? 'all' : 'planned')} active={statusF === 'planned'} />
+          <MiniBadge n={doneList.length} label="проведено" color={C.ok} bg={C.okSoft} onClick={() => setStatusF(statusF === 'проведён' ? 'all' : 'проведён')} active={statusF === 'проведён'} />
+          <MiniBadge n={cancelledList.length} label="отменено" color={C.slate} bg={C.grey} onClick={() => setStatusF(statusF === 'отменён' ? 'all' : 'отменён')} active={statusF === 'отменён'} />
+        </div>
+      )}
+
+      {(noPlanList.length > 0 || noTopicList.length > 0) && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '10px 14px', marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>Требует внимания</div>
+          {noPlanList.length > 0 && (
+            <AttentionRow onClick={() => setAttentionF(attentionF === 'noplan' ? null : 'noplan')} active={attentionF === 'noplan'}>
+              {noPlanList.length} {noPlanList.length === 1 ? 'занятие проведено' : 'занятия проведены'} без плана урока
+            </AttentionRow>
+          )}
+          {noTopicList.length > 0 && (
+            <AttentionRow onClick={() => setAttentionF(attentionF === 'notopic' ? null : 'notopic')} active={attentionF === 'notopic'}>
+              {noTopicList.length} {noTopicList.length === 1 ? 'занятие проведено' : 'занятия проведены'} без темы урока
+            </AttentionRow>
+          )}
+        </div>
+      )}
+
+      {(officeOptions.length > 1 || subjectOptions.length > 1 || groupOptions.length > 1) && (
+        <div className="rowflex" style={{ gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          {officeOptions.length > 1 && (
+            <select value={officeF} onChange={(e) => setOfficeF(e.target.value)} style={filterSel}>
+              <option value="all">Все офисы</option>
+              {officeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          )}
+          {subjectOptions.length > 1 && (
+            <select value={subjectF} onChange={(e) => setSubjectF(e.target.value)} style={filterSel}>
+              <option value="all">Все предметы</option>
+              {subjectOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          )}
+          {groupOptions.length > 1 && (
+            <select value={groupF} onChange={(e) => setGroupF(e.target.value)} style={filterSel}>
+              <option value="all">Все группы</option>
+              {groupOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          )}
         </div>
       )}
 
@@ -76,15 +143,23 @@ export default function MyLessons() {
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>На этот день занятий нет</div>
           <div style={{ fontSize: 13, color: C.slate }}>Занятия появляются из расписания, которое ведёт завуч.</div>
         </div>
+      ) : visibleRows.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', background: C.card, border: `1px dashed ${C.line}`, borderRadius: 14, color: C.slate }}>
+          По этому фильтру занятий нет. <button onClick={() => { setOfficeF('all'); setSubjectF('all'); setGroupF('all'); setStatusF('all'); setAttentionF(null) }}
+            style={{ border: 'none', background: 'none', color: C.brand, fontWeight: 700, cursor: 'pointer', padding: 0, marginLeft: 4 }}>Сбросить фильтры</button>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {rows.map((l) => {
+          {visibleRows.map((l) => {
             const done = l.status === 'проведён'
             const cancelled = l.status === 'отменён'
+            const m = STATUS_META[l.status] || STATUS_META.planned
+            const flagged = done && (!l.plan_path || !l.topic?.trim())
             return (
               <div key={l.lesson_id}
                 style={{
-                  background: C.card, border: `1px solid ${done ? C.ok + '44' : cancelled ? C.line : C.line}`,
+                  background: C.card, border: `1px solid ${C.line}`,
+                  borderLeft: `4px solid ${flagged ? '#d97706' : m.color}`,
                   borderRadius: 13, padding: 15, opacity: cancelled ? 0.6 : 1,
                 }}>
                 <div className="rowflex" style={{ gap: 10, flexWrap: 'wrap' }}>
@@ -145,7 +220,7 @@ export default function MyLessons() {
 }
 
 // ---------- КАРТОЧКА ПРОВЕДЕНИЯ ЗАНЯТИЯ ----------
-function ConductCard({ lesson, onBack, onDone }) {
+function ConductCard({ lesson, teacherId, onBack, onDone }) {
   const [students, setStudents] = useState(null)
   const [marks, setMarks] = useState({})       // { studentId: {status, reason} }
   const [topic, setTopic] = useState(lesson.topic || '')
@@ -153,6 +228,8 @@ function ConductCard({ lesson, onBack, onDone }) {
   const [count, setCount] = useState(lesson.lessons_count || 2)
   const [hasTest, setHasTest] = useState(false)
   const [maxScore, setMaxScore] = useState('')
+  const [planPath, setPlanPath] = useState(lesson.plan_path || null)
+  const [planFile, setPlanFile] = useState(null) // новый файл, выбранный, но ещё не загруженный
   const [busy, setBusy] = useState(false)
   const [cancelMode, setCancelMode] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -208,10 +285,16 @@ function ConductCard({ lesson, onBack, onDone }) {
     }
     setBusy(true); setErr('')
     try {
+      let finalPlanPath = planPath
+      if (planFile) {
+        if (!teacherId) throw new Error('Не удалось определить преподавателя для загрузки файла')
+        finalPlanPath = await uploadPlan(planFile, teacherId)
+      }
       await conductLesson(lesson.lesson_id, {
         topic, comment, lessons_count: count,
         has_test: hasTest,
         test_max_score: hasTest ? (Number(maxScore) || null) : null,
+        plan_path: finalPlanPath,
         attendance: (students || []).map((s) => ({
           student_id: s.id,
           status: marks[s.id]?.status || 'present',
@@ -288,6 +371,37 @@ function ConductCard({ lesson, onBack, onDone }) {
                 style={{ width: '100%', padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13.5, outline: 'none' }} />
             </div>
           )}
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <Label>План урока</Label>
+          <div className="rowflex" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {planFile ? (
+              <span className="rowflex" style={{ gap: 6, fontSize: 13, color: C.ink }}>
+                <Paperclip size={14} /> {planFile.name} <span style={{ color: C.faint }}>(будет загружен при сохранении)</span>
+              </span>
+            ) : planPath ? (
+              <>
+                <button type="button" onClick={async () => { const url = await planUrl(planPath); if (url) window.open(url, '_blank') }}
+                  className="rowflex" style={{ gap: 5, fontSize: 12.5, color: C.ok, background: C.okSoft, border: 'none', borderRadius: 8, padding: '6px 11px', cursor: 'pointer', fontWeight: 600 }}>
+                  <Paperclip size={13} /> Открыть план
+                </button>
+                <label className="rowflex" style={{ gap: 5, fontSize: 12.5, color: C.slate, border: `1px dashed ${C.line}`, borderRadius: 8, padding: '6px 11px', cursor: 'pointer' }}>
+                  Заменить
+                  <input type="file" accept=".pdf,.doc,.docx" style={{ display: 'none' }} onChange={(e) => setPlanFile(e.target.files[0] || null)} />
+                </label>
+                <button type="button" onClick={() => { if (confirm('Убрать прикреплённый план?')) setPlanPath(null) }}
+                  style={{ fontSize: 12.5, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 4px' }}>
+                  Удалить
+                </button>
+              </>
+            ) : (
+              <label className="rowflex" style={{ gap: 6, padding: '9px 12px', border: `1px dashed ${C.line}`, borderRadius: 10, fontSize: 13, color: C.slate, cursor: 'pointer' }}>
+                <Paperclip size={14} /> Прикрепить файл (pdf, docx)
+                <input type="file" accept=".pdf,.doc,.docx" style={{ display: 'none' }} onChange={(e) => setPlanFile(e.target.files[0] || null)} />
+              </label>
+            )}
+          </div>
         </div>
       </div>
 
@@ -433,10 +547,22 @@ const navBtn = {
 function Label({ children }) {
   return <div style={{ fontSize: 12, color: C.slate, fontWeight: 600, marginBottom: 6 }}>{children}</div>
 }
-function MiniBadge({ n, label, color, bg }) {
+function MiniBadge({ n, label, color, bg, onClick, active }) {
   return (
-    <span style={{ fontSize: 12, fontWeight: 700, color, background: bg, padding: '5px 12px', borderRadius: 20 }}>
+    <button onClick={onClick} style={{
+      fontSize: 12, fontWeight: 700, color, background: bg, padding: '5px 12px', borderRadius: 20,
+      border: active ? `1.5px solid ${color}` : '1.5px solid transparent', cursor: onClick ? 'pointer' : 'default',
+    }}>
       {n} {label}
-    </span>
+    </button>
   )
 }
+function AttentionRow({ children, onClick, active }) {
+  return (
+    <div onClick={onClick} className="rowflex"
+      style={{ gap: 6, fontSize: 12.5, color: '#92400e', cursor: 'pointer', padding: '3px 0', fontWeight: active ? 800 : 600, textDecoration: active ? 'underline' : 'none' }}>
+      <AlertTriangle size={13} /> {children}
+    </div>
+  )
+}
+const filterSel = { padding: '7px 10px', border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 12.5, outline: 'none', background: '#fff' }

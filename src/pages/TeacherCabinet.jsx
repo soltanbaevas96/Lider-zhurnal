@@ -6,11 +6,12 @@ import { Stat } from '../components/ui'
 import PeriodPicker from '../components/PeriodPicker'
 import LessonTable from '../components/LessonTable'
 import LessonForm from '../components/LessonForm'
-import { fetchMyGroupsAndSubjects } from '../lib/api'
+import { fetchMyGroupsAndSubjects, fetchAttendanceForLessons } from '../lib/api'
 
 export default function TeacherCabinet({ teacher, dict, lessons, period, setPeriod, onLessonAdded, onLessonChanged, onLessonDeleted }) {
   const [editing, setEditing] = useState(null) // 'new' | lesson | null
   const [myLinks, setMyLinks] = useState(null) // { groups, subjects } — закреплённые за преподавателем
+  const [attendance, setAttendance] = useState([]) // [{ lesson_id, present }] по своим проведённым урокам за период
 
   useEffect(() => {
     fetchMyGroupsAndSubjects(teacher.id)
@@ -29,6 +30,34 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
   const own = lessons.filter((l) => l.teacher_id === teacher.id)
   const done = own.filter((l) => l.status === 'проведён')
   const myHours = done.reduce((s, l) => s + lessonCount(l), 0)
+
+  // Посещаемость по группам за текущий период (п.65 ТЗ) — считаем из
+  // тех же attendance-записей, что уже видны преподавателю по RLS
+  // (свои уроки), без отдельной новой RPC.
+  const doneIds = done.map((l) => l.id).sort().join(',')
+  useEffect(() => {
+    if (!done.length) { setAttendance([]); return }
+    let stop = false
+    fetchAttendanceForLessons(done.map((l) => l.id)).then((a) => { if (!stop) setAttendance(a) }).catch(() => {})
+    return () => { stop = true }
+  }, [doneIds])
+
+  const attendanceByGroup = (() => {
+    const byLesson = {}
+    attendance.forEach((a) => { (byLesson[a.lesson_id] ||= []).push(a) })
+    const byGroup = {}
+    done.forEach((l) => {
+      const recs = byLesson[l.id] || []
+      if (!recs.length) return
+      const g = (byGroup[l.group_id] ||= { total: 0, present: 0 })
+      g.total += recs.length
+      g.present += recs.filter((r) => r.present).length
+    })
+    return Object.entries(byGroup).map(([groupId, v]) => ({
+      groupId, name: (dict.groups || []).find((g) => g.id === groupId)?.name || '—',
+      pct: v.total ? Math.round((v.present / v.total) * 100) : null,
+    })).filter((g) => g.pct != null).sort((a, b) => b.pct - a.pct)
+  })()
 
   function exportXlsx() {
     const groupOf = (id) => (dict.groups || []).find((g) => g.id === id)
@@ -71,6 +100,23 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
         <Stat icon={CheckCircle2} label="Проведено" value={done.length} tint={C.ok} bg={C.okSoft} />
         <Stat icon={FileText} label="Без плана" value={done.filter((l) => !l.plan_path).length} tint={C.warn} bg={C.warnSoft} />
       </div>
+
+      {attendanceByGroup.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 22 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Посещаемость по группам</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {attendanceByGroup.map((g) => (
+              <div key={g.groupId} className="rowflex" style={{ gap: 10 }}>
+                <span style={{ fontSize: 13, flex: 1, minWidth: 0 }}>{g.name}</span>
+                <div style={{ width: 120, height: 6, background: C.grey, borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ width: `${g.pct}%`, height: '100%', background: g.pct >= 85 ? C.ok : g.pct >= 70 ? C.warn : '#dc2626' }} />
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 800, width: 42, textAlign: 'right' }}>{g.pct}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <h2 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 800 }}>Мои уроки</h2>
       <LessonTable lessons={own} dict={dict} onEdit={(l) => setEditing(l)} />

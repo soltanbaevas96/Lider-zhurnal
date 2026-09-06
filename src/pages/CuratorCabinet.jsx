@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Plus, Search, X, Check, Trash2, Calendar, BookOpen, Users, ChevronLeft, ChevronRight } from 'lucide-react'
 import {
-  getMyCuratorId, createCuratorLesson, getCuratorLessons, deleteCuratorLesson, fetchAllStudents,
+  getMyCuratorId, createCuratorLesson, getCuratorLessons, deleteCuratorLesson, searchStudentsQuick,
 } from '../lib/api'
 import { C, fmtDate, initials, avColorByIndex, currentMonth, monthRange, shiftMonthStr, monthLabelOf } from '../lib/utils'
 
@@ -94,20 +94,30 @@ export default function CuratorCabinet({ curator }) {
 }
 
 function LessonModal({ curatorId, onClose, onDone }) {
-  const [allStudents, setAllStudents] = useState([])
   const [selected, setSelected] = useState([]) // student objects
   const [q, setQ] = useState('')
+  const [found, setFound] = useState([])
+  const [searching, setSearching] = useState(false)
   const [date, setDate] = useState(todayStr())
   const [lessonsCount, setLessonsCount] = useState('2')
   const [topic, setTopic] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { fetchAllStudents().then(setAllStudents).catch(() => {}) }, [])
-
-  const found = q.trim().length >= 2
-    ? allStudents.filter((s) => (s.full_name || '').toLowerCase().includes(q.toLowerCase()) && !selected.find((x) => x.id === s.id)).slice(0, 8)
-    : []
+  // Серверный поиск (не тянем всех учеников центра в браузер сразу —
+  // п.57 ТЗ): debounce 300мс, минимум 2 символа.
+  useEffect(() => {
+    const t = q.trim()
+    if (t.length < 2) { setFound([]); setSearching(false); return }
+    setSearching(true)
+    const timer = setTimeout(() => {
+      searchStudentsQuick(t)
+        .then((list) => setFound(list.filter((s) => !selected.find((x) => x.id === s.id)).slice(0, 8)))
+        .catch(() => setFound([]))
+        .finally(() => setSearching(false))
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [q, selected])
 
   async function save() {
     if (!selected.length) { setErr('Выберите хотя бы одного ученика'); return }
@@ -161,19 +171,26 @@ function LessonModal({ curatorId, onClose, onDone }) {
           )}
           <div style={{ position: 'relative' }}>
             <Search size={16} color={C.faint} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика по имени…" style={{ ...inp, paddingLeft: 38 }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск ученика по имени или телефону…" style={{ ...inp, paddingLeft: 38 }} />
           </div>
-          {found.length > 0 && (
+          {searching && <div style={{ fontSize: 12, color: C.faint, marginTop: 6 }}>Ищу…</div>}
+          {!searching && found.length > 0 && (
             <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, marginTop: 6, overflow: 'hidden' }}>
               {found.map((s) => (
-                <div key={s.id} onClick={() => { setSelected((a) => [...a, s]); setQ('') }}
+                // Дубль исключён заранее: found уже не содержит выбранных (see useEffect выше) — п.42 ТЗ.
+                <div key={s.id} onClick={() => { setSelected((a) => a.find((x) => x.id === s.id) ? a : [...a, s]); setQ('') }}
                   className="rowflex" style={{ gap: 10, padding: '9px 12px', cursor: 'pointer', borderTop: `1px solid ${C.line}` }}>
                   <div className="av" style={{ width: 26, height: 26, fontSize: 11, background: avColorByIndex(0) }}>{initials(s.full_name)}</div>
                   <span style={{ fontSize: 13.5 }}>{s.full_name}</span>
-                  {s.office && <span style={{ fontSize: 11.5, color: C.faint, marginLeft: 'auto' }}>{s.office}</span>}
+                  <span style={{ fontSize: 11.5, color: C.faint, marginLeft: 'auto', textAlign: 'right' }}>
+                    {[s.office, s.grade ? `${s.grade} класс` : null].filter(Boolean).join(' · ')}
+                  </span>
                 </div>
               ))}
             </div>
+          )}
+          {!searching && q.trim().length >= 2 && found.length === 0 && (
+            <div style={{ fontSize: 12, color: C.faint, marginTop: 6 }}>Никого не найдено</div>
           )}
         </div>
 

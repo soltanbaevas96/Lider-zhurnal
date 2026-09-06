@@ -271,6 +271,20 @@ export async function saveAttendance(lessonId, records) {
   }
 }
 
+// Массовая выборка посещаемости по списку уроков (для аналитики
+// «посещаемость по группам» в кабинете преподавателя) — RLS уже
+// ограничивает attendance своими уроками, отдельно office/teacher не
+// проверяем, лишнее ограничение тут не нужно.
+export async function fetchAttendanceForLessons(lessonIds) {
+  if (!lessonIds?.length) return []
+  const { data, error } = await supabase
+    .from('attendance')
+    .select('lesson_id, present')
+    .in('lesson_id', lessonIds)
+  if (error) throw error
+  return data || []
+}
+
 // ---------- РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ----------
 export async function fetchStudentTestScores(studentId) {
   const { data, error } = await supabase.rpc('get_student_test_scores', { p_student_id: studentId })
@@ -343,6 +357,22 @@ export async function findStudentsByName(fullName, excludeId) {
     .ilike('full_name', name)
   if (excludeId) q = q.neq('id', excludeId)
   const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+// Быстрый серверный поиск ученика (для куратора) — по ФИО или телефону,
+// выполняется в Postgres (ilike), а не тянет всю таблицу в браузер.
+export async function searchStudentsQuick(q) {
+  const t = q.trim().replace(/,/g, ' ')
+  if (t.length < 2) return []
+  const { data, error } = await supabase
+    .from('students')
+    .select('id, full_name, office, grade, phone, school')
+    .eq('archived', false)
+    .or(`full_name.ilike.%${t}%,phone.ilike.%${t}%`)
+    .order('full_name')
+    .limit(20)
   if (error) throw error
   return data || []
 }
@@ -754,8 +784,8 @@ export async function fetchLessonPlansOverview(period) {
 }
 
 // Провести занятие: тема + посещаемость + статус (+ баллы за тест, если был)
-export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance, has_test, test_max_score }) {
-  const { error: le } = await supabase.from('lessons').update({
+export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance, has_test, test_max_score, plan_path }) {
+  const patch = {
     topic: topic || '',
     comment: comment || null,
     lessons_count: Number(lessons_count) || 2,
@@ -763,7 +793,11 @@ export async function conductLesson(lessonId, { topic, comment, lessons_count, a
     conducted_at: new Date().toISOString(),
     has_test: !!has_test,
     test_max_score: has_test ? (Number(test_max_score) || null) : null,
-  }).eq('id', lessonId)
+  }
+  // plan_path необязателен — если не передан, поле не трогаем (не затираем
+  // уже прикреплённый план, если сохраняем без изменений в нём).
+  if (plan_path !== undefined) patch.plan_path = plan_path
+  const { error: le } = await supabase.from('lessons').update(patch).eq('id', lessonId)
   if (le) throw le
 
   await supabase.from('attendance').delete().eq('lesson_id', lessonId)
