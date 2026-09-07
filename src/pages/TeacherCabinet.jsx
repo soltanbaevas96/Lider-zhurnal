@@ -31,6 +31,17 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
   const done = own.filter((l) => l.status === 'проведён')
   const myHours = done.reduce((s, l) => s + lessonCount(l), 0)
 
+  // «Журнал» — это история и ручное редактирование уже состоявшихся
+  // занятий (статус 'проведён'/'отменён'). Занятия из расписания со
+  // статусом 'planned' ЕЩЁ НЕ проведены — их открывают и заполняют
+  // (тема/посещаемость) через «Мои занятия», а не здесь: форма
+  // редактирования Журнала вообще не поддерживает статус 'planned'
+  // (её выбор статуса — только «Проведён»/«Отменён»), поэтому для
+  // такого занятия блок посещаемости просто не показывался — это и
+  // был баг «нет списка учеников» (не путать с настоящей пустой
+  // группой или ошибкой RLS, которые тоже были исправлены отдельно).
+  const journalLessons = own.filter((l) => l.status !== 'planned')
+
   // Посещаемость по группам за текущий период (п.65 ТЗ) — считаем из
   // тех же attendance-записей, что уже видны преподавателю по RLS
   // (свои уроки), без отдельной новой RPC.
@@ -61,7 +72,7 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
 
   function exportXlsx() {
     const groupOf = (id) => (dict.groups || []).find((g) => g.id === id)
-    const rows = [...own].sort((a, b) => b.lesson_date.localeCompare(a.lesson_date)).map((l) => {
+    const rows = [...journalLessons].sort((a, b) => b.lesson_date.localeCompare(a.lesson_date)).map((l) => {
       const g = groupOf(l.group_id)
       return {
         Дата: l.lesson_date, Группа: g?.name || '', Предмет: (g?.subject_name || '').split(' / ')[0],
@@ -85,8 +96,8 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
         </div>
         <div className="rowflex" style={{ marginLeft: 'auto', gap: 10 }}>
           <PeriodPicker period={period} setPeriod={setPeriod} />
-          <button onClick={exportXlsx} disabled={!own.length} className="rowflex"
-            style={{ gap: 6, padding: '10px 14px', background: '#fff', color: own.length ? C.slate : C.faint, border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13.5, fontWeight: 700, cursor: own.length ? 'pointer' : 'default' }}>
+          <button onClick={exportXlsx} disabled={!journalLessons.length} className="rowflex"
+            style={{ gap: 6, padding: '10px 14px', background: '#fff', color: journalLessons.length ? C.slate : C.faint, border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13.5, fontWeight: 700, cursor: journalLessons.length ? 'pointer' : 'default' }}>
             <Download size={15} /> Excel
           </button>
           <button onClick={() => setEditing('new')} className="rowflex" style={{ gap: 7, padding: '10px 17px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
@@ -119,7 +130,12 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
       )}
 
       <h2 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 800 }}>Мои уроки</h2>
-      <LessonTable lessons={own} dict={dict} onEdit={(l) => setEditing(l)} />
+      {own.length > journalLessons.length && (
+        <p style={{ margin: '-8px 0 12px', fontSize: 12.5, color: C.slate }}>
+          Ещё не проведённые занятия из расписания здесь не показываются — их нужно провести во вкладке «Мои занятия».
+        </p>
+      )}
+      <LessonTable lessons={journalLessons} dict={dict} onEdit={(l) => setEditing(l)} />
 
       {editing && (
         <LessonForm
