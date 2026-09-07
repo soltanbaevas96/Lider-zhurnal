@@ -254,21 +254,23 @@ export async function fetchAttendance(lessonId) {
   return data
 }
 
-// Сохранить посещаемость урока целиком (перезапись)
+// Сохранить посещаемость урока: UPSERT по (lesson_id, student_id), а не
+// «удалить всё и вставить заново» (п.12 ТЗ) — если запись уже есть,
+// обновляется на месте; если нет — создаётся. Ученик, которого больше
+// нет в списке (убрали из группы задним числом), просто не упоминается
+// в records — его старая запись НЕ удаляется, история не теряется (п.10 ТЗ).
 export async function saveAttendance(lessonId, records) {
-  await supabase.from('attendance').delete().eq('lesson_id', lessonId)
-  if (records.length) {
-    const rows = records.map((r) => ({
-      lesson_id: lessonId,
-      student_id: r.student_id,
-      status: r.status || (r.present ? 'present' : 'absent'),
-      present: r.present,
-      absence_reason: r.present ? null : (r.absence_reason || null),
-      score: r.score ?? null,
-    }))
-    const { error } = await supabase.from('attendance').insert(rows)
-    if (error) throw error
-  }
+  if (!records.length) return
+  const rows = records.map((r) => ({
+    lesson_id: lessonId,
+    student_id: r.student_id,
+    status: r.status || (r.present ? 'present' : 'absent'),
+    present: r.present,
+    absence_reason: r.present ? null : (r.absence_reason || null),
+    score: r.score ?? null,
+  }))
+  const { error } = await supabase.from('attendance').upsert(rows, { onConflict: 'lesson_id,student_id' })
+  if (error) throw error
 }
 
 // Массовая выборка посещаемости по списку уроков (для аналитики
@@ -831,7 +833,7 @@ export async function conductLesson(lessonId, { topic, comment, lessons_count, a
   const { error: le } = await supabase.from('lessons').update(patch).eq('id', lessonId)
   if (le) throw le
 
-  await supabase.from('attendance').delete().eq('lesson_id', lessonId)
+  // UPSERT, не DELETE+INSERT (п.12 ТЗ) — та же причина, что и в saveAttendance().
   if (attendance?.length) {
     const rows = attendance.map((a) => ({
       lesson_id: lessonId,
@@ -841,7 +843,7 @@ export async function conductLesson(lessonId, { topic, comment, lessons_count, a
       absence_reason: a.status === 'absent' ? (a.absence_reason || null) : null,
       score: has_test && a.score !== '' && a.score != null ? Number(a.score) : null,
     }))
-    const { error } = await supabase.from('attendance').insert(rows)
+    const { error } = await supabase.from('attendance').upsert(rows, { onConflict: 'lesson_id,student_id' })
     if (error) throw error
   }
 }

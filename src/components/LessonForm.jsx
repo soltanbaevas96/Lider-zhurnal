@@ -11,8 +11,14 @@ import GroupSearchSelect from './GroupSearchSelect'
 export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, onDeleted }) {
   const editing = !!lesson
   const today = todayStr()
+  // При РЕДАКТИРОВАНИИ существующего урока группа НЕ подставляется
+  // автоматически, даже если lesson.group_id почему-то пуст — иначе
+  // список учеников молча показывал бы состав случайной первой группы
+  // вместо ошибки (см. миграция 68, п.19 ТЗ). Автоподстановка первой
+  // группы остаётся только при СОЗДАНИИ нового урока — там это просто
+  // удобное значение по умолчанию, а не подмена реальных данных.
   const [f, setF] = useState({
-    group_id: lesson?.group_id || dict.groups[0]?.id || '',
+    group_id: editing ? (lesson?.group_id || '') : (dict.groups[0]?.id || ''),
     assistant_id: lesson?.assistant_id || '',
     assistant2_id: lesson?.assistant2_id || '',
     lesson_date: lesson?.lesson_date || today,

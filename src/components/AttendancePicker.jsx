@@ -55,6 +55,9 @@ export default function AttendancePicker({ groupId, lessonId, hasTest, onChange 
         }
         if (!cancelled) setMarks(init)
       } catch (e) {
+        // Ошибку не маскируем под «пустую группу» (п.18 ТЗ) — показываем
+        // явно пользователю и пишем в консоль для диагностики.
+        console.error('AttendancePicker: не удалось загрузить учеников/посещаемость', { groupId, lessonId, error: e })
         if (!cancelled) setErr(e.message)
       }
     })()
@@ -95,13 +98,28 @@ export default function AttendancePicker({ groupId, lessonId, hasTest, onChange 
       return next
     })
 
-  if (!groupId) return null
-  if (err) return <div style={{ fontSize: 13, color: '#c2360b' }}>{err}</div>
+  // Никогда не молчим: отсутствие группы у занятия — это ошибка данных,
+  // а не «нечего показывать» (п.19 ТЗ) — раньше здесь было `return null`,
+  // из-за чего блок посещаемости просто исчезал без всякого объяснения.
+  if (!groupId) {
+    return (
+      <div style={{ fontSize: 13, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 12 }}>
+        У этого занятия не указана группа. Обратитесь к администратору.
+      </div>
+    )
+  }
+  if (err) {
+    return (
+      <div style={{ fontSize: 13, color: '#c2360b', background: '#fde8e8', border: '1px solid #f5b5b5', borderRadius: 10, padding: 12 }}>
+        Не удалось загрузить список учеников. {err}
+      </div>
+    )
+  }
   if (students === null) return <div style={{ fontSize: 13, color: C.slate, padding: 10 }}>Загрузка учеников…</div>
   if (students.length === 0) {
     return (
       <div style={{ fontSize: 13, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 12 }}>
-        В этой группе нет учеников. Добавьте их в разделе «Управление».
+        В этой группе пока нет учеников. Добавьте их в разделе «Управление».
       </div>
     )
   }

@@ -237,6 +237,14 @@ function ConductCard({ lesson, teacherId, onBack, onDone }) {
 
   useEffect(() => {
     let stop = false
+    // Отсутствие группы у занятия — ошибка данных, а не «пустая группа»
+    // (п.19 ТЗ): не гадаем и не запрашиваем всё подряд, сразу говорим,
+    // в чём дело, и не оставляем список в вечной «Загрузке…».
+    if (!lesson.group_id) {
+      setStudents([])
+      setErr('У этого занятия не указана группа. Обратитесь к администратору.')
+      return
+    }
     Promise.all([
       fetchStudentsOfGroup(lesson.group_id),
       fetchAttendance(lesson.lesson_id).catch(() => []),
@@ -256,7 +264,10 @@ function ConductCard({ lesson, teacherId, onBack, onDone }) {
         }
       })
       setMarks(init)
-    }).catch((e) => setErr(e.message))
+    }).catch((e) => {
+      console.error('MyLessons/ConductCard: не удалось загрузить учеников/посещаемость', { lessonId: lesson.lesson_id, groupId: lesson.group_id, error: e })
+      if (!stop) { setErr(e.message); setStudents([]) }
+    })
     return () => { stop = true }
   }, [lesson])
 
@@ -429,12 +440,17 @@ function ConductCard({ lesson, teacherId, onBack, onDone }) {
         </div>
       )}
 
-      {/* Ученики */}
+      {/* Ученики — ошибку (в т.ч. «нет группы») показываем отдельно от
+          настоящей пустой группы (п.18-19 ТЗ), не маскируем одно другим. */}
       {students === null ? (
         <div style={{ padding: 40, textAlign: 'center', color: C.slate }}>Загрузка учеников…</div>
+      ) : err ? (
+        <div style={{ padding: 30, textAlign: 'center', background: '#fde8e8', border: '1px solid #f5b5b5', borderRadius: 12, color: '#c2360b', fontSize: 13.5 }}>
+          {err}
+        </div>
       ) : students.length === 0 ? (
         <div style={{ padding: 30, textAlign: 'center', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, color: '#92400e', fontSize: 13.5 }}>
-          В этой группе нет учеников. Обратитесь к завучу, чтобы их добавили.
+          В этой группе пока нет учеников. Обратитесь к завучу, чтобы их добавили.
         </div>
       ) : (
         <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 13, overflow: 'hidden' }}>
