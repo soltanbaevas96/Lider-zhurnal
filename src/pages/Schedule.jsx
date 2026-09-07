@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Plus, Trash2, Zap, X, AlertTriangle, ChevronLeft, ChevronRight,
-  Search, Download, Printer, Upload, Check, Maximize2,
+  Search, Download, Printer, Upload, Check, Maximize2, RotateCw,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import {
   fetchScheduleSlots, saveScheduleSlot, checkScheduleConflicts, deleteSchedule,
+  getScheduleSlotImpact, syncAllSchedules,
   generateLessons, fetchMissedLessons, addGroup,
 } from '../lib/api'
 import { C, OFFICES, todayStr, addDaysStr, mondayOf, fmtDate } from '../lib/utils'
@@ -133,11 +134,13 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const [dayOffset, setDayOffset] = useState(0)
 
   const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, start_time, end_time } для нового с предзаполнением
-  const [confirmDel, setConfirmDel] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(null) // id слота на удаление
+  const [delImpact, setDelImpact] = useState(null)   // { future_count, conducted_count } для диалога подтверждения (п.27 ТЗ)
   const [gen, setGen] = useState(false)
   const [excelOpen, setExcelOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [syncBusy, setSyncBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [fullscreen, setFullscreen] = useState(false)
   const pageRef = useRef(null)
@@ -214,11 +217,42 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
     return { real: real.length, reserve: reserve.length, occupied: occupied.length, conflicts: conflicts.length }
   }, [visibleSlots, conflictMap])
 
+  // Перед удалением показываем, сколько занятий реально затронет удаление
+  // (п.27 ТЗ) — отдельным запросом, до самого подтверждения.
+  async function openDeleteConfirm(id) {
+    setConfirmDel(id); setDelImpact(null)
+    try { setDelImpact(await getScheduleSlotImpact(id)) }
+    catch { setDelImpact({ future_count: null, conducted_count: null }) }
+  }
+
+  // Удаляет (архивирует) слот расписания. На сервере это снимает ТОЛЬКО
+  // будущие непроведённые занятия этого слота — проведённые остаются в
+  // истории/табеле/зарплате навсегда (миграция 67, п.9-10 ТЗ).
   async function remove(id) {
     setBusy(true)
-    try { await deleteSchedule(id); setConfirmDel(null); await load() }
+    try {
+      const r = await deleteSchedule(id)
+      setConfirmDel(null); setDelImpact(null)
+      setMsg(`Расписание удалено. Будущих занятий удалено: ${r?.future_deleted ?? 0}. Проведённых занятий сохранено: ${r?.conducted_protected ?? 0}.`)
+      await load()
+      setTimeout(() => setMsg(''), 8000)
+    }
     catch (e) { setErr(e.message) }
     finally { setBusy(false) }
+  }
+
+  // «Синхронизировать» (п.21 ТЗ) — защитный пересчёт будущих занятий по
+  // всем активным слотам сразу, для уже существующих (созданных раньше)
+  // данных. Проведённые занятия не трогает никогда.
+  async function runSync() {
+    setSyncBusy(true); setErr('')
+    try {
+      const r = await syncAllSchedules()
+      setMsg(`Синхронизация завершена. Проверено слотов: ${r?.slots_processed ?? 0}. Будущих занятий пересоздано: ${r?.future_created ?? 0}. Устаревших удалено: ${r?.future_deleted ?? 0}.`)
+      await load()
+      setTimeout(() => setMsg(''), 10000)
+    } catch (e) { setErr(e.message) }
+    finally { setSyncBusy(false) }
   }
 
   function exportXlsx() {
@@ -305,6 +339,10 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
               <button onClick={() => setGen(true)} className="rowflex"
                 style={{ gap: 6, padding: '8px 14px', background: C.teal, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
                 <Zap size={15} /> Создать занятия
+              </button>
+              <button onClick={runSync} disabled={syncBusy} className="rowflex" title="Пересчитать будущие занятия по всем слотам (проведённые не трогает)"
+                style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: syncBusy ? 0.6 : 1 }}>
+                <RotateCw size={15} /> {syncBusy ? 'Синхронизирую…' : 'Синхронизировать'}
               </button>
             </>
           )}
@@ -452,13 +490,38 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         <SlotModal slot={editSlot} dict={dict} roomOptions={roomOptions} pageOffice={office} lockedOffice={lockedOffice}
           canTransferOffice={isAdmin}
           onClose={() => setEditSlot(null)}
-          onSaved={async () => { setEditSlot(null); await load() }}
-          onDelete={(id) => { setEditSlot(null); setConfirmDel(id) }} />
+          onSaved={async (result) => {
+            setEditSlot(null)
+            // future_synced/conducted_protected приходят только при
+            // изменении УЖЕ существующего слота (миграция 67) — для
+            // нового слота сервер вернёт 0/0, сообщение не показываем.
+            if (result && (result.future_synced || result.conducted_protected)) {
+              setMsg(`Расписание обновлено. Будущих занятий синхронизировано: ${result.future_synced}. Проведённых занятий сохранено: ${result.conducted_protected}.`)
+              setTimeout(() => setMsg(''), 8000)
+            }
+            await load()
+          }}
+          onDelete={(id) => { setEditSlot(null); openDeleteConfirm(id) }} />
       )}
 
       {confirmDel && (
-        <ConfirmBox title="Удалить занятие из расписания?" busy={busy}
-          onCancel={() => setConfirmDel(null)} onConfirm={() => remove(confirmDel)} confirmText="Удалить" />
+        <ConfirmBox
+          title="Удалить занятие из расписания?"
+          busy={busy}
+          onCancel={() => { setConfirmDel(null); setDelImpact(null) }}
+          onConfirm={() => remove(confirmDel)}
+          confirmText="Удалить расписание">
+          {delImpact ? (
+            <p style={{ fontSize: 13.5, color: C.slate, margin: '0 0 4px', lineHeight: 1.6 }}>
+              У этого расписания{' '}
+              <b style={{ color: C.ink }}>{delImpact.future_count ?? '—'}</b> будущих непроведённых занятий и{' '}
+              <b style={{ color: C.ink }}>{delImpact.conducted_count ?? '—'}</b> уже проведённых.<br />
+              Будущие непроведённые занятия будут удалены. Проведённые занятия сохранятся в истории, посещаемости, табеле и зарплате — они не удаляются никогда.
+            </p>
+          ) : (
+            <p style={{ fontSize: 13.5, color: C.slate, margin: 0 }}>Проверяю связанные занятия…</p>
+          )}
+        </ConfirmBox>
       )}
 
       {gen && (
@@ -947,8 +1010,9 @@ function SlotModal({ slot, dict, roomOptions, pageOffice, lockedOffice, canTrans
     if (conflicts.length > 0) { setErr('Есть конфликт расписания — сначала устраните его'); return }
     setBusy(true)
     try {
+      let result = null
       if (editing) {
-        await saveScheduleSlot(slot.id, {
+        result = await saveScheduleSlot(slot.id, {
           office, room, groupId: isReal ? groupId : null, teacherId: isReal ? teacherId : null, assistantId: isReal ? (assistantId || null) : null,
           weekday: days[0], startTime, endTime, lessonsCount: Number(count), status, activeFrom, activeTo: activeTo || null, notes,
         })
@@ -960,7 +1024,7 @@ function SlotModal({ slot, dict, roomOptions, pageOffice, lockedOffice, canTrans
           })
         }
       }
-      await onSaved()
+      await onSaved(result)
     } catch (e) { setErr(e.message); setBusy(false) }
   }
 
@@ -1381,12 +1445,13 @@ function ImportWizard({ dict, initialOffice, onClose, onDone }) {
   )
 }
 
-function ConfirmBox({ title, busy, onCancel, onConfirm, confirmText }) {
+function ConfirmBox({ title, children, busy, onCancel, onConfirm, confirmText }) {
   return (
     <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 90 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 380, padding: 22 }}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 800 }}>{title}</h3>
-        <div style={{ display: 'flex', gap: 10 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, width: '100%', maxWidth: 420, padding: 22 }}>
+        <h3 style={{ margin: children ? '0 0 10px' : '0 0 16px', fontSize: 16, fontWeight: 800 }}>{title}</h3>
+        {children}
+        <div style={{ display: 'flex', gap: 10, marginTop: children ? 16 : 0 }}>
           <button onClick={onCancel} style={{ flex: 1, padding: 11, borderRadius: 10, background: C.grey, color: C.ink, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Отмена</button>
           <button onClick={onConfirm} disabled={busy} style={{ flex: 1, padding: 11, borderRadius: 10, background: '#dc2626', color: '#fff', fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? '…' : confirmText}</button>
         </div>

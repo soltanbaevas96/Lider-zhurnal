@@ -701,9 +701,15 @@ export async function checkScheduleConflicts(slot) {
 }
 
 // Создать (id=null) или изменить (id задан) слот расписания. Проверка
-// конфликтов и прав — на сервере (save_schedule_slot), см. 53_schedule_rebuild.sql.
+// конфликтов и прав — на сервере (save_schedule_slot), миграция 67.
 // slot: { office, room, groupId, teacherId, assistantId, weekday, startTime,
 // endTime, lessonsCount, status, activeFrom, activeTo, notes }
+// Возвращает { id, future_synced, conducted_protected } — при изменении
+// существующего слота будущие непроведённые занятия синхронизируются
+// автоматически на сервере (п.15 ТЗ по синхронизации), проведённые не
+// трогаются никогда. При создании нового слота future_synced/
+// conducted_protected всегда 0 (генерация занятий — отдельное действие
+// «Создать занятия»).
 export async function saveScheduleSlot(id, slot) {
   const { data, error } = await supabase.rpc('save_schedule_slot', {
     p_id: id || null, p_office: slot.office, p_room: slot.room,
@@ -713,12 +719,34 @@ export async function saveScheduleSlot(id, slot) {
     p_active_from: slot.activeFrom || null, p_active_to: slot.activeTo || null, p_notes: slot.notes || null,
   })
   if (error) throw error
-  return data
+  return Array.isArray(data) ? data[0] : data
 }
 
-export async function deleteSchedule(id) {
-  const { error } = await supabase.from('schedule').update({ archived: true }).eq('id', id)
+// Сколько занятий этого слота будут затронуты удалением — для диалога
+// подтверждения (п.27 ТЗ), до самого удаления.
+export async function getScheduleSlotImpact(id) {
+  const { data, error } = await supabase.rpc('get_schedule_slot_impact', { p_id: id })
   if (error) throw error
+  return Array.isArray(data) ? data[0] : data || { future_count: 0, conducted_count: 0 }
+}
+
+// Удалить (мягко архивировать) слот расписания. Удаляет/снимает ТОЛЬКО
+// будущие непроведённые занятия этого слота — проведённые остаются в
+// истории/табеле/зарплате навсегда (миграция 67, п.9-10 ТЗ).
+// Возвращает { future_deleted, conducted_protected }.
+export async function deleteSchedule(id) {
+  const { data, error } = await supabase.rpc('delete_schedule_slot', { p_id: id })
+  if (error) throw error
+  return Array.isArray(data) ? data[0] : data
+}
+
+// Кнопка «Синхронизировать» — пересчитывает будущие занятия по ВСЕМ
+// активным слотам расписания разом (защитный механизм для уже
+// существующих данных, п.21 ТЗ). Проведённые занятия не трогает.
+export async function syncAllSchedules() {
+  const { data, error } = await supabase.rpc('sync_all_schedules')
+  if (error) throw error
+  return Array.isArray(data) ? data[0] : data
 }
 
 // Сгенерировать ожидаемые занятия за период
