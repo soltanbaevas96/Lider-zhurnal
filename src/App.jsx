@@ -22,6 +22,7 @@ import EntBase from './pages/EntBase'
 import Schedule from './pages/Schedule'
 import MyLessons from './pages/MyLessons'
 import GlobalSearch from './components/GlobalSearch'
+import ErrorBoundary from './components/ErrorBoundary'
 
 export default function App() {
   const { session, profile, teacher, curator, isCurator, isAdmin, isDirector, isManager, isOfficeManager, isSeniorOM, isAccountant, isMethodist, managerOffice, loading, signOut } = useAuth()
@@ -215,6 +216,7 @@ export default function App() {
       <main className="wrap" style={scheduleFullBleed ? { padding: '20px 24px 24px', maxWidth: 'none' } : { padding: '20px 16px 64px' }}>
         {error && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 14, borderRadius: 12, marginBottom: 16, fontSize: 14 }}>{error}</div>}
 
+        <ErrorBoundary key={`${view}-${openStudent || ''}`}>
         {!dict ? (
           <Spinner label="Загрузка данных…" />
         ) : openStudent ? (
@@ -305,6 +307,7 @@ export default function App() {
             Ваш аккаунт не привязан к преподавателю. Обратитесь к администратору центра, чтобы он связал ваш профиль с карточкой преподавателя.
           </div>
         )}
+        </ErrorBoundary>
         {dataLoading && dict && <div style={{ textAlign: 'center', color: C.faint, fontSize: 12, marginTop: 16 }}>Обновление…</div>}
       </main>
     </div>

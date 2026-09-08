@@ -3,7 +3,7 @@ import { Plus, Search, X, Check, Trash2, Calendar, BookOpen, Users, ChevronLeft,
 import {
   getMyCuratorId, createCuratorLesson, getCuratorLessons, deleteCuratorLesson, searchStudentsQuick,
 } from '../lib/api'
-import { C, fmtDate, initials, avColorByIndex, currentMonth, monthRange, shiftMonthStr, monthLabelOf } from '../lib/utils'
+import { C, fmtDate, initials, avColorByIndex, currentMonth, monthRange, shiftMonthStr, monthLabelOf, todayStr } from '../lib/utils'
 
 // Кабинет куратора: индивидуальные доп.занятия с отдельными учениками.
 export default function CuratorCabinet({ curator }) {
@@ -75,7 +75,11 @@ export default function CuratorCabinet({ curator }) {
                 <span style={{ fontSize: 13.5, fontWeight: 700 }}>{fmtDate(l.lesson_date)}</span>
                 <span style={{ fontSize: 12.5, color: C.brand, background: C.brandSoft, padding: '2px 10px', borderRadius: 20, fontWeight: 700 }}>{l.lessons_count} урок(а)</span>
                 <span style={{ fontSize: 12.5, color: C.slate }}><Users size={12} style={{ verticalAlign: 'middle' }} /> {l.student_count}</span>
-                <button onClick={async () => { if (confirm('Удалить это занятие?')) { await deleteCuratorLesson(l.id); reload() } }}
+                <button onClick={async () => {
+                  if (!confirm('Удалить это занятие?')) return
+                  try { await deleteCuratorLesson(l.id); await reload() }
+                  catch (e) { console.error('CuratorCabinet: не удалось удалить занятие', e); setErr('Не удалось удалить занятие. Попробуйте ещё раз.') }
+                }}
                   style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }} title="Удалить"><Trash2 size={14} /></button>
               </div>
               {l.topic && <div style={{ fontSize: 13.5, marginBottom: 3 }}>{l.topic}</div>}
