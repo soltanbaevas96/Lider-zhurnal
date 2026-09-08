@@ -46,14 +46,21 @@ function setStoredOffice(o) {
   try { localStorage.setItem(LAST_OFFICE_KEY, o) } catch { /* ignore */ }
 }
 
-// Конфликты — единая функция для сетки/списка/статистики (п.5-9,32-35 ТЗ):
-//  - КАБИНЕТ и ГРУППА проверяются ТОЛЬКО внутри одного офиса (officeItems
-//    здесь — уже все занятия ТЕКУЩЕГО офиса, без учёта строчных фильтров
-//    кабинета/преподавателя/группы/поиска — иначе фильтр мог бы случайно
-//    спрятать вторую половину настоящего конфликта).
+// Конфликты — единая функция для сетки/списка/статистики (п.5-9,32-35 ТЗ
+// + п.15-16 ТЗ по режиму «По преподавателям»):
+//  - КАБИНЕТ и ГРУППА проверяются ТОЛЬКО внутри одного офиса. officeItems
+//    здесь — база расчёта: обычно занятия ТЕКУЩЕГО офиса (без учёта
+//    строчных фильтров кабинета/группы/поиска — иначе фильтр мог бы
+//    случайно спрятать вторую половину настоящего конфликта), но при
+//    выбранном преподавателе это ВСЕ его занятия по всем офисам сразу —
+//    поэтому здесь ЯВНО проверяется a.office === b.office, а не
+//    подразумевается неявно (иначе кабинет «2» в разных офисах одного
+//    преподавателя ошибочно считался бы конфликтом кабинета).
 //  - ПРЕПОДАВАТЕЛЬ и АССИСТЕНТ проверяются ГЛОБАЛЬНО по всем офисам
 //    (allItems — вообще все занятия центра) — человек физически не может
-//    вести два занятия одновременно, даже в разных офисах.
+//    вести два занятия одновременно, даже в разных офисах. Именно эта
+//    ветка и ловит «Маргулана 18:00 / Усолка 18:00» для одного
+//    преподавателя (п.15-16 ТЗ) — офис здесь намеренно не сравнивается.
 // Возвращает Map(id -> { room, group, teacher: otherSlot|null, assistant: otherSlot|null }).
 function computeConflicts(officeItems, allItems) {
   const map = new Map()
@@ -66,7 +73,7 @@ function computeConflicts(officeItems, allItems) {
   for (let i = 0; i < officeItems.length; i++) {
     for (let j = i + 1; j < officeItems.length; j++) {
       const a = officeItems[i], b = officeItems[j]
-      if (!sameSlot(a, b)) continue
+      if (!sameSlot(a, b) || a.office !== b.office) continue
       if (a.room && b.room && a.room === b.room) { ensure(a.id).room = true; ensure(b.id).room = true }
       if (a.group_id && b.group_id && a.group_id === b.group_id) { ensure(a.id).group = true; ensure(b.id).group = true }
     }
@@ -183,20 +190,51 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   // и для «По группам»/«По преподавателям» этого офиса.
   const officeSlots = useMemo(() => (slots || []).filter((r) => r.office === office), [slots, office])
 
+  // Режим «По преподавателям» (п.1-3 ТЗ): если в фильтре выбран конкретный
+  // преподаватель — база расчёта меняется с «текущий офис» на «ВСЕ его
+  // занятия по ВСЕМ офисам». Фильтр офиса при этом не отбрасывается молча
+  // (п.4 ТЗ) — просто перестаёт быть базой выборки, пока явно не сброшен
+  // выбор преподавателя. Матчим строго по teacher_id, не по имени (п.6 ТЗ).
+  const teacherActive = !!teacherF
+  const teacherSlots = useMemo(
+    () => (slots || []).filter((r) => r.teacher_id === teacherF),
+    [slots, teacherF]
+  )
+  const baseSlots = teacherActive ? teacherSlots : officeSlots
+  const selectedTeacherName = teacherActive ? ((dict.teachers || []).find((t) => t.id === teacherF)?.full_name || '') : ''
+
   const roomOptions = useMemo(() => [...new Set(officeSlots.map((s) => s.room))].sort(), [officeSlots])
+  // Группы для фильтра — при выбранном преподавателе это ЕГО группы по
+  // всем офисам (п.7 ТЗ: «все группы преподавателя по всем офисам должны
+  // быть видны»), иначе — группы текущего офиса, как раньше.
+  const groupFilterOptions = useMemo(() => {
+    if (teacherActive) {
+      const ids = new Set(teacherSlots.map((r) => r.group_id).filter(Boolean))
+      return (dict.groups || []).filter((g) => ids.has(g.id))
+    }
+    return (dict.groups || []).filter((g) => g.office === office)
+  }, [teacherActive, teacherSlots, dict.groups, office])
 
   // Класс слота — у самого schedule такого поля нет, берём из его группы
   // (groups.grade).
   const gradeOfSlot = (r) => (dict.groups || []).find((g) => g.id === r.group_id)?.grade || null
 
-  const conflictMap = useMemo(() => computeConflicts(officeSlots, slots || []), [officeSlots, slots])
+  // conflictMap считается от baseSlots (не officeSlots) — иначе конфликт
+  // «тот же преподаватель в 18:00 в Маргулана и в Усолке» (п.8-9 ТЗ) не
+  // попал бы в officeItems целиком и не был бы найден. Кабинет/группа
+  // внутри computeConflicts дополнительно проверяют a.office===b.office,
+  // так что при разных офисах преподавателя они не сработают ложно.
+  const conflictMap = useMemo(() => computeConflicts(baseSlots, slots || []), [baseSlots, slots])
 
   // Слот считается видимым в выбранной неделе, если период его действия
   // (active_from/active_to) пересекается с [weekStart, weekEnd].
   const visibleSlots = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return officeSlots.filter((r) => {
-      if (room && r.room !== room) return false
+    return baseSlots.filter((r) => {
+      // Кабинет — фильтр по номеру кабинета не имеет смысла при просмотре
+      // преподавателя по всем офисам сразу (номера кабинетов не связаны
+      // между офисами), поэтому пропускается в этом режиме.
+      if (!teacherActive && room && r.room !== room) return false
       if (grade && gradeOfSlot(r) !== grade) return false
       if (teacherF && r.teacher_id !== teacherF) return false
       if (groupF && r.group_id !== groupF) return false
@@ -205,7 +243,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
       if (!s) return true
       return (r.group_name || '').toLowerCase().includes(s) || (r.teacher_name || '').toLowerCase().includes(s) || (r.room || '').toLowerCase().includes(s)
     })
-  }, [officeSlots, room, grade, teacherF, groupF, q, weekStart, weekEnd, dict.groups])
+  }, [baseSlots, teacherActive, room, grade, teacherF, groupF, q, weekStart, weekEnd, dict.groups])
 
   // Сводка сверху — «настоящих» занятий/резервов/занято/конфликтов
   // текущего офиса (п.14 ТЗ).
@@ -279,7 +317,12 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
       День: WD.find((w) => w.n === r.weekday)?.t, Время: `${fmtHM(r.start_time)}–${fmtHM(r.end_time)}`,
     })))
     addSheet(wb, 'По преподавателям', teacherRows)
-    XLSX.writeFile(wb, `Расписание_${office}_${weekStart}.xlsx`)
+    // В режиме «По преподавателям» visibleSlots уже содержит ТОЛЬКО
+    // занятия выбранного преподавателя по всем офисам (п.10 ТЗ), колонка
+    // «Офис» в каждом листе уже есть — дополнительно фильтровать нечего,
+    // меняется только имя файла.
+    const fileLabel = teacherActive ? (selectedTeacherName || 'преподаватель') : office
+    XLSX.writeFile(wb, `Расписание_${fileLabel}_${weekStart}.xlsx`)
     setExcelOpen(false)
   }
 
@@ -296,30 +339,54 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   return (
     <div ref={pageRef} style={{ display: 'flex', flexDirection: 'column', height: fullscreen ? '100vh' : 'calc(100vh - 132px)', minHeight: 480, background: fullscreen ? '#fff' : 'transparent', padding: fullscreen ? 16 : 0 }}>
       <style>{`
+        .print-only { display: none; }
         @media print {
           @page { size: landscape; }
           .no-print { display: none !important; }
+          .print-only { display: block !important; }
           .sched-day { break-inside: avoid; }
         }
       `}</style>
 
+      {/* Заголовок при печати (п.11 ТЗ) — сам экранный <h1> внутри
+          скрывается печатью вместе со всей панелью управления, поэтому
+          нужен отдельный печатный заголовок с тем же текстом и периодом. */}
+      <div className="print-only" style={{ marginBottom: 10 }}>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>
+          {teacherActive ? `Расписание преподавателя: ${selectedTeacherName || '—'}` : `Расписание — ${office}`}
+        </h1>
+        <div style={{ fontSize: 13, color: '#555' }}>{fmtDate(weekStart)} — {fmtDate(weekEnd)}</div>
+      </div>
+
       <div className="rowflex no-print" style={{ marginBottom: 10, gap: 12, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 130 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>Расписание</h1>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
+            {teacherActive ? `Расписание преподавателя: ${selectedTeacherName || '—'}` : 'Расписание'}
+          </h1>
         </div>
 
         {/* Офис — главный переключатель контекста (п.13,40 ТЗ): один
             офис = одно рабочее расписание. Только он и определяет, что
-            видно; «Все офисы» здесь никогда не появляется. */}
+            видно; «Все офисы» здесь никогда не появляется. Исключение —
+            режим «По преподавателям» (п.1-4 ТЗ): пока выбран конкретный
+            преподаватель, база выборки — все его офисы сразу, а сам
+            переключатель офиса становится неактивным (но НЕ пропадает и
+            НЕ игнорируется молча — рядом явное пояснение). */}
         {lockedOffice ? (
           <span className="rowflex" style={{ gap: 6, padding: '9px 14px', background: C.brandSoft, borderRadius: 10, fontSize: 13.5, fontWeight: 800, color: C.brand }}>
             {lockedOffice}
           </span>
         ) : (
-          <select value={office} onChange={(e) => changeOffice(e.target.value)}
-            style={{ ...selSty, padding: '9px 14px', fontSize: 13.5, fontWeight: 800, color: C.brand, background: C.brandSoft, border: `1.5px solid ${C.brand}` }}>
+          <select value={office} onChange={(e) => changeOffice(e.target.value)} disabled={teacherActive}
+            title={teacherActive ? 'При выбранном преподавателе показываются все его офисы' : undefined}
+            style={{ ...selSty, padding: '9px 14px', fontSize: 13.5, fontWeight: 800, color: C.brand, background: C.brandSoft, border: `1.5px solid ${C.brand}`, opacity: teacherActive ? 0.55 : 1, cursor: teacherActive ? 'not-allowed' : 'pointer' }}>
             {OFFICES.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
+        )}
+        {teacherActive && (
+          <span className="rowflex" style={{ gap: 6, padding: '9px 12px', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: '#3730a3' }}>
+            Показано расписание преподавателя по всем офисам
+          </span>
         )}
 
         <div className="rowflex" style={{ gap: 6 }}>
@@ -346,7 +413,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
               </button>
             </>
           )}
-          {canEditSlots && (
+          {canEditSlots && !teacherActive && (
             <button onClick={() => setEditSlot('new')} className="rowflex"
               style={{ gap: 6, padding: '8px 14px', background: C.brand, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
               <Plus size={16} /> Добавить занятие
@@ -417,7 +484,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         )}
       </div>
       <div className="no-print rowflex" style={{ gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {mode === 'week' && (
+        {mode === 'week' && !teacherActive && (
           <select value={room} onChange={(e) => setRoom(e.target.value)} style={selSty}>
             <option value="">Все кабинеты</option>
             {roomOptions.map((r) => <option key={r} value={r}>Кабинет {r}</option>)}
@@ -428,7 +495,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
           <option value="10">10 класс</option>
           <option value="11">11 класс</option>
         </select>
-        {mode === 'week' && (
+        {(mode === 'week' || mode === 'list') && (
           <>
             <select value={teacherF} onChange={(e) => setTeacherF(e.target.value)} style={selSty}>
               <option value="">Все преподаватели</option>
@@ -436,7 +503,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
             </select>
             <select value={groupF} onChange={(e) => setGroupF(e.target.value)} style={selSty}>
               <option value="">Все группы</option>
-              {(dict.groups || []).filter((g) => g.office === office).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              {groupFilterOptions.map((g) => <option key={g.id} value={g.id}>{g.name}{teacherActive ? ` (${g.office})` : ''}</option>)}
             </select>
           </>
         )}
@@ -466,8 +533,9 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         <ScheduleList
           slots={visibleSlots} weekStart={weekStart} gradeOfSlot={gradeOfSlot} conflictMap={conflictMap}
           onOpenSlot={(r) => setEditSlot(r)}
-          canEditSlots={canEditSlots}
+          canEditSlots={canEditSlots && !teacherActive}
           onAdd={() => setEditSlot('new')}
+          emptyMessage={teacherActive ? `У ${selectedTeacherName || 'преподавателя'} нет занятий на эту неделю.` : undefined}
         />
       ) : (
         <ScheduleGrid
@@ -476,13 +544,14 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
           dayCount={dayCount}
           dayOffset={dayOffset}
           setDayOffset={setDayOffset}
-          canEditSlots={canEditSlots}
+          canEditSlots={canEditSlots && !teacherActive}
           gradeOfSlot={gradeOfSlot}
           conflictMap={conflictMap}
           onOpenSlot={(r) => setEditSlot(r)}
           onCreateAt={(weekday, time) => setEditSlot({
             weekday, start_time: time, end_time: fromMin(toMin(time) + 80),
           })}
+          emptyMessage={teacherActive && visibleSlots.length === 0 ? `У ${selectedTeacherName || 'преподавателя'} нет занятий на эту неделю.` : ''}
         />
       )}
 
@@ -601,7 +670,7 @@ function layoutDay(items) {
   return { placed, overflow }
 }
 
-function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, canEditSlots, gradeOfSlot, conflictMap, onOpenSlot, onCreateAt }) {
+function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, canEditSlots, gradeOfSlot, conflictMap, onOpenSlot, onCreateAt, emptyMessage }) {
   const [overflowOpen, setOverflowOpen] = useState(null) // { items }
   const maxOffset = Math.max(0, 7 - dayCount)
   const offset = Math.min(dayOffset, maxOffset)
@@ -636,6 +705,14 @@ function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, can
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {/* Пустая неделя у выбранного преподавателя — показываем понятное
+          сообщение, но сама сетка остаётся видимой (п.13 ТЗ), а не
+          подменяется пустым экраном. */}
+      {emptyMessage && (
+        <div className="no-print" style={{ padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, color: '#92400e', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+          {emptyMessage}
+        </div>
+      )}
       {dayCount < 7 && (
         <div className="rowflex no-print" style={{ gap: 8, marginBottom: 8 }}>
           <button onClick={() => setDayOffset(Math.max(0, offset - dayCount))} disabled={offset === 0} style={{ ...navBtn, opacity: offset === 0 ? 0.4 : 1 }} title="Предыдущие дни"><ChevronLeft size={14} /></button>
@@ -778,7 +855,7 @@ function LessonCard({ r, grade, conflict, onClick, style }) {
 // ================= РЕЖИМ «СПИСОК» =================
 // Полная альтернатива сетке — хронологический список по дням, карточки
 // на всю ширину, всегда полноразмерные и читаемые.
-function ScheduleList({ slots, weekStart, gradeOfSlot, conflictMap, onOpenSlot, canEditSlots, onAdd }) {
+function ScheduleList({ slots, weekStart, gradeOfSlot, conflictMap, onOpenSlot, canEditSlots, onAdd, emptyMessage }) {
   const byDay = useMemo(() => {
     const m = {}
     WD.forEach((w) => { m[w.n] = [] })
@@ -791,7 +868,7 @@ function ScheduleList({ slots, weekStart, gradeOfSlot, conflictMap, onOpenSlot, 
   if (daysWithData.length === 0) {
     return (
       <div style={{ padding: 40, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
-        <p style={{ color: C.slate, fontSize: 13.5, margin: canEditSlots ? '0 0 14px' : 0 }}>На эту неделю занятий нет.</p>
+        <p style={{ color: C.slate, fontSize: 13.5, margin: canEditSlots ? '0 0 14px' : 0 }}>{emptyMessage || 'На эту неделю занятий нет.'}</p>
         {canEditSlots && (
           <button onClick={onAdd} style={{ padding: '9px 16px', background: C.brand, color: '#fff', border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Добавить занятие</button>
         )}
