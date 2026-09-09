@@ -1,152 +1,186 @@
 import React, { useState } from 'react'
-import { GraduationCap, Video, ClipboardList, LineChart, ShieldCheck, Lock, User } from 'lucide-react'
+import { GraduationCap, Lock, User, Eye, EyeOff, ArrowRight } from 'lucide-react'
 import { useAuth } from '../lib/auth'
+import { C } from '../lib/utils'
 
-const L = {
-  navy1: '#0a1a3f', navy2: '#0d2a5e', navy3: '#12376e',
-  ink: '#0b1730', white: '#ffffff', mute: '#aab7d4', faint: '#7f8fb5',
-  orange: '#f5a020', orangeHi: '#ffb733', cyan: '#4cc3e0', blue: '#2f6bff',
-  field: '#f4f6fb', cardLine: '#e6e9f2',
-}
-
-const FEATURES = [
-  { icon: Video, title: 'Журнал уроков', sub: 'Дата, группа, тема, количество' },
-  { icon: ClipboardList, title: 'Планы занятий', sub: 'Файл плана к каждому уроку' },
-  { icon: LineChart, title: 'Учёт нагрузки', sub: 'Уроки по каждому преподавателю' },
-  { icon: ShieldCheck, title: 'Посещаемость', sub: 'Контроль по группам и ученикам' },
-]
-
+// Экран входа — редизайн (ТЗ «Полный редизайн стартовой страницы»).
+// Это ТОЛЬКО визуальная переработка: signIn(), сессия, роли и редирект
+// после входа — тот же самый существующий useAuth(), ничего в
+// auth-логике не менялось. Раньше страница была лендингом с длинным
+// маркетинговым текстом, статистикой и блоком из 4 карточек функций —
+// всё это убрано, экран сведён к двум вещам: бренд и форма входа.
 export default function Login() {
   const { signIn } = useAuth()
-  const [email, setEmail] = useState('')
+  const [login, setLogin] = useState('')
   const [pass, setPass] = useState('')
+  const [showPass, setShowPass] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function submit() {
+    if (busy) return
     setBusy(true); setErr('')
-    const { error } = await signIn(email.trim(), pass)
+    const { error } = await signIn(login.trim(), pass)
+    // Технический текст ошибки Supabase намеренно не показываем — ни
+    // пользователю, ни в консоли не должно быть намёка, какой из двух
+    // (логин/пароль) неверен.
     if (error) setErr('Неверный логин или пароль')
     setBusy(false)
   }
 
+  const canSubmit = login.trim() && pass && !busy
+
   return (
-    <div style={{ fontFamily: "'Inter',system-ui,sans-serif", color: L.white, minHeight: '100vh', background: `radial-gradient(1200px 600px at 78% -10%, ${L.navy3} 0%, ${L.navy2} 40%, ${L.navy1} 100%)` }}>
+    <div className="lp-page">
       <style>{`
-        *{box-sizing:border-box;} button{font-family:inherit;cursor:pointer;border:none;}
-        input{font-family:inherit;}
-        .lp-wrap{max-width:1240px;margin:0 auto;padding:0 28px;}
-        .lp-nav-links{display:flex;gap:34px;}
-        .lp-hero{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:start;padding:36px 0 60px;}
-        .lp-stats{display:flex;flex-wrap:wrap;}
-        .lp-foot{display:grid;grid-template-columns:repeat(4,1fr);gap:22px;}
-        .lp-h1{font-size:60px;line-height:1.03;font-weight:800;letter-spacing:-1.5px;margin:0;}
-        @media(max-width:960px){
-          .lp-hero{grid-template-columns:1fr;gap:32px;}
-          .lp-nav-links,.lp-phone{display:none!important;}
-          .lp-h1{font-size:40px;}
-          .lp-foot{grid-template-columns:1fr 1fr;gap:16px;}
+        .lp-page * { box-sizing: border-box; }
+        .lp-page {
+          min-height: 100vh; display: flex; flex-direction: column;
+          background: #F7F9FC; font-family: 'Inter', system-ui, -apple-system, sans-serif;
         }
-        .lp-field{width:100%;padding:14px 16px 14px 42px;border-radius:12px;border:1px solid ${L.cardLine};background:${L.field};font-size:15px;color:${L.ink};outline:none;}
-        .lp-field::placeholder{color:#9aa6c2;}
+        .lp-main { flex: 1; display: flex; min-height: 0; }
+        .lp-brand {
+          flex: 0 0 46%; position: relative; overflow: hidden;
+          display: flex; align-items: center; justify-content: center; padding: 40px;
+          background: linear-gradient(165deg, #101a45 0%, #0a0f2c 100%);
+        }
+        .lp-brand::before {
+          content: ''; position: absolute; inset: -10%; pointer-events: none;
+          background: radial-gradient(560px 380px at 82% 8%, rgba(124,107,240,.20), transparent 60%);
+        }
+        .lp-brand-inner { position: relative; max-width: 380px; }
+        .lp-badge {
+          width: 56px; height: 56px; border-radius: 16px; margin-bottom: 24px;
+          background: linear-gradient(135deg, ${C.brand}, ${C.brand2});
+          display: grid; place-items: center; box-shadow: 0 14px 32px rgba(67,56,202,.45);
+        }
+        .lp-wordmark { font-size: 40px; font-weight: 800; letter-spacing: -1px; color: #fff; margin: 0 0 16px; }
+        .lp-wordmark span { color: ${C.brand2}; }
+        .lp-tagline { font-size: 17px; line-height: 1.5; color: #aeb7d9; font-weight: 500; margin: 0 0 18px; }
+        .lp-sub { font-size: 14px; color: #7782a8; margin: 0; }
+        .lp-formzone { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; }
+        .lp-card {
+          width: 100%; max-width: 420px; background: #fff; border-radius: 22px; padding: 36px;
+          border: 1px solid #eef0f7; box-shadow: 0 24px 60px rgba(20,24,58,.08);
+          animation: lp-appear .35s ease-out;
+        }
+        @keyframes lp-appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        .lp-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+        .lp-card-icon {
+          width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+          background: linear-gradient(135deg, ${C.brand}, ${C.brand2}); display: grid; place-items: center;
+        }
+        .lp-card-title { font-size: 21px; font-weight: 800; color: ${C.ink}; margin: 0; line-height: 1.2; }
+        .lp-card-sub { font-size: 13.5px; color: #7a86a3; margin: 3px 0 0; }
+        .lp-label { font-size: 13px; font-weight: 700; color: #3d4460; display: block; margin-bottom: 7px; }
+        .lp-field-wrap { position: relative; margin-bottom: 18px; }
+        .lp-field-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #9aa6c2; pointer-events: none; }
+        .lp-field {
+          width: 100%; padding: 13px 14px 13px 40px; border-radius: 12px; border: 1.5px solid #e6e9f2;
+          background: #f9fafc; font-size: 15px; color: ${C.ink}; outline: none;
+          transition: border-color .15s, background .15s, box-shadow .15s;
+        }
+        .lp-field::placeholder { color: #a3add0; }
+        .lp-field:focus {
+          border-color: ${C.brand}; background: #fff; box-shadow: 0 0 0 3px rgba(67,56,202,.12);
+        }
+        .lp-field:disabled { opacity: .65; }
+        .lp-field-pass { padding-right: 42px; }
+        .lp-eye {
+          position: absolute; right: 8px; top: 50%; transform: translateY(-50%); padding: 7px; border-radius: 8px;
+          background: none; border: none; color: #9aa6c2; display: flex; cursor: pointer;
+        }
+        .lp-eye:hover { color: ${C.brand}; background: ${C.brandSoft}; }
+        .lp-eye:focus-visible, .lp-field:focus-visible { outline: 2px solid ${C.brand2}; outline-offset: 1px; }
+        .lp-error {
+          background: #fdecec; color: #c2360b; font-size: 13px; padding: 10px 12px; border-radius: 10px; margin-bottom: 16px;
+        }
+        .lp-submit {
+          width: 100%; height: 50px; border-radius: 13px; border: none; cursor: pointer;
+          background: linear-gradient(180deg, ${C.brand2}, ${C.brand}); color: #fff; font-weight: 700; font-size: 15.5px;
+          display: flex; align-items: center; justify-content: center; gap: 8px;
+          box-shadow: 0 12px 26px rgba(67,56,202,.32); transition: filter .15s;
+        }
+        .lp-submit:hover:not(:disabled) { filter: brightness(1.07); }
+        .lp-submit:disabled { opacity: .55; cursor: default; box-shadow: none; }
+        .lp-submit:focus-visible { outline: 2px solid ${C.brand2}; outline-offset: 2px; }
+        .lp-spinner {
+          width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.45); border-top-color: #fff;
+          border-radius: 50%; animation: lp-spin .7s linear infinite;
+        }
+        @keyframes lp-spin { to { transform: rotate(360deg); } }
+        .lp-help { text-align: center; font-size: 13px; color: #8891ac; margin: 20px 0 0; }
+        .lp-footer { text-align: center; font-size: 12px; color: #9aa0c0; padding: 14px 0; }
+
+        @media (max-width: 880px) {
+          .lp-main { flex-direction: column; }
+          .lp-brand { flex: 0 0 auto; padding: 34px 24px 26px; }
+          .lp-brand::before { display: none; }
+          .lp-badge { width: 44px; height: 44px; border-radius: 13px; margin-bottom: 14px; }
+          .lp-wordmark { font-size: 29px; margin-bottom: 6px; }
+          .lp-tagline { font-size: 14.5px; margin-bottom: 0; }
+          .lp-sub { display: none; }
+          .lp-formzone { padding: 22px; }
+          .lp-card { padding: 26px 22px; border-radius: 18px; }
+        }
       `}</style>
 
-      <div className="lp-wrap" style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '22px 28px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 2, fontSize: 30, fontWeight: 800, letterSpacing: -1 }}>
-            Лидер<span style={{ color: L.cyan }}>+</span>
+      <div className="lp-main">
+        <div className="lp-brand">
+          <div className="lp-brand-inner">
+            <div className="lp-badge"><GraduationCap size={26} color="#fff" /></div>
+            <h1 className="lp-wordmark">Лидер<span>+</span></h1>
+            <p className="lp-tagline">Система управления<br />образовательным центром</p>
+            <p className="lp-sub">Все процессы центра — в одной системе.</p>
           </div>
-          <div style={{ fontSize: 11, letterSpacing: 2, color: L.faint, marginTop: 2 }}>СИСТЕМА УЧЁТА УРОКОВ</div>
         </div>
-        <nav className="lp-nav-links" style={{ margin: '0 auto' }}>
-          {['Журнал', 'Преподаватели', 'Посещаемость', 'Отчёты'].map((x) => (
-            <span key={x} style={{ color: L.mute, fontSize: 15, fontWeight: 500 }}>{x}</span>
-          ))}
-        </nav>
-        <span className="lp-phone" style={{ color: L.white, fontWeight: 700, fontSize: 15 }}>+7 705 357 ···</span>
-      </div>
 
-      <div className="lp-wrap lp-hero">
-        <div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: `1px solid ${L.navy3}`, background: 'rgba(76,195,224,.08)', padding: '8px 16px', borderRadius: 30, marginBottom: 26 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 4, background: L.cyan }} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: L.cyan }}>Образовательный центр «Лидер+» · Павлодар</span>
-          </div>
-          <h1 className="lp-h1">Единый журнал<br />работы <span style={{ color: L.orange }}>центра</span></h1>
-          <p style={{ fontSize: 18, lineHeight: 1.55, color: L.mute, maxWidth: 540, margin: '26px 0 34px' }}>
-            Преподаватели ведут уроки и отмечают посещаемость, а руководство видит полную картину нагрузки и явки — по каждому офису, группе и ученику, за любой период.
-          </p>
-          <div className="lp-stats" style={{ marginTop: 10 }}>
-            {[
-              { n: '5', hi: '', l: 'офисов: Маргулана, Усолка, Торайгырова, Камзина, Чокина' },
-              { n: '2', hi: '', l: 'языка обучения: каз и рус' },
-              { n: '1', hi: '', l: 'журнал вместо десятков таблиц' },
-            ].map((s, i) => (
-              <div key={i} style={{ paddingRight: 30, marginRight: 30, borderRight: i < 2 ? `1px solid ${L.navy3}` : 'none' }}>
-                <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: -1 }}>{s.n}<span style={{ color: L.cyan }}>{s.hi}</span></div>
-                <div style={{ fontSize: 14, color: L.faint, marginTop: 4, maxWidth: 150 }}>{s.l}</div>
+        <div className="lp-formzone">
+          <form className="lp-card" onSubmit={(e) => { e.preventDefault(); submit() }} noValidate>
+            <div className="lp-card-head">
+              <div className="lp-card-icon"><GraduationCap size={21} color="#fff" /></div>
+              <div>
+                <h2 className="lp-card-title">Войти в систему</h2>
+                <p className="lp-card-sub">Введите данные сотрудника</p>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Форма входа */}
-        <div style={{ background: '#fff', borderRadius: 22, padding: 30, boxShadow: '0 30px 70px rgba(0,0,0,.35)', color: L.ink }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 22 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 11, background: `linear-gradient(135deg,${L.blue},${L.cyan})`, display: 'grid', placeItems: 'center' }}>
-              <GraduationCap size={22} color="#fff" />
             </div>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>Вход в систему</div>
-              <div style={{ fontSize: 13, color: '#7a86a3' }}>Для сотрудников центра «Лидер+»</div>
+
+            <label htmlFor="lp-login" className="lp-label">Логин</label>
+            <div className="lp-field-wrap">
+              <User size={17} className="lp-field-icon" />
+              <input
+                id="lp-login" className="lp-field" value={login} disabled={busy}
+                onChange={(e) => setLogin(e.target.value)} placeholder="Введите логин"
+                autoComplete="username" autoFocus
+              />
             </div>
-          </div>
 
-          <label style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>Логин</label>
-          <div style={{ position: 'relative', marginBottom: 18 }}>
-            <User size={17} color="#9aa6c2" style={{ position: 'absolute', left: 15, top: 15 }} />
-            <input className="lp-field" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="например asaparova" onKeyDown={(e) => e.key === 'Enter' && submit()} />
-          </div>
+            <label htmlFor="lp-pass" className="lp-label">Пароль</label>
+            <div className="lp-field-wrap">
+              <Lock size={17} className="lp-field-icon" />
+              <input
+                id="lp-pass" type={showPass ? 'text' : 'password'} className="lp-field lp-field-pass"
+                value={pass} disabled={busy} onChange={(e) => setPass(e.target.value)}
+                placeholder="Введите пароль" autoComplete="current-password"
+              />
+              <button type="button" className="lp-eye" onClick={() => setShowPass((v) => !v)}
+                aria-label={showPass ? 'Скрыть пароль' : 'Показать пароль'} tabIndex={0}>
+                {showPass ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
 
-          <label style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 8 }}>Пароль</label>
-          <div style={{ position: 'relative', marginBottom: 22 }}>
-            <Lock size={17} color="#9aa6c2" style={{ position: 'absolute', left: 15, top: 15 }} />
-            <input type="password" className="lp-field" value={pass} onChange={(e) => setPass(e.target.value)}
-              placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && submit()} />
-          </div>
+            {err && <div className="lp-error" role="alert">{err}</div>}
 
-          {err && <div style={{ color: '#c2360b', fontSize: 13, marginBottom: 14, textAlign: 'center' }}>{err}</div>}
+            <button type="submit" className="lp-submit" disabled={!canSubmit}>
+              {busy ? (<><span className="lp-spinner" /> Вход…</>) : (<>Войти <ArrowRight size={18} /></>)}
+            </button>
 
-          <button onClick={submit} disabled={busy}
-            style={{ width: '100%', background: `linear-gradient(180deg,${L.blue},#1f56e6)`, color: '#fff', fontWeight: 800, fontSize: 16, padding: 16, borderRadius: 13, boxShadow: '0 10px 26px rgba(47,107,255,.35)', opacity: busy ? 0.7 : 1 }}>
-            {busy ? 'Вход…' : 'Войти в систему'}
-          </button>
-
-          <p style={{ fontSize: 12.5, color: '#9aa6c2', textAlign: 'center', margin: '16px 0 0', lineHeight: 1.5 }}>
-            Доступ выдаёт администратор центра «Лидер+».<br />Пароль забыли — обратитесь к завучу.
-          </p>
+            <p className="lp-help">Нет доступа? Обратитесь к администратору.</p>
+          </form>
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid rgba(255,255,255,.07)', background: 'rgba(4,12,30,.4)', marginTop: 10 }}>
-        <div className="lp-wrap lp-foot" style={{ padding: '26px 28px' }}>
-          {FEATURES.map((f) => {
-            const Icon = f.icon
-            return (
-              <div key={f.title} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div style={{ width: 46, height: 46, borderRadius: 12, background: 'rgba(76,195,224,.12)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                  <Icon size={22} color={L.cyan} />
-                </div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15.5 }}>{f.title}</div>
-                  <div style={{ fontSize: 13, color: L.faint, marginTop: 2 }}>{f.sub}</div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      <div className="lp-footer">Лидер+ • Система управления образовательным центром</div>
     </div>
   )
 }
