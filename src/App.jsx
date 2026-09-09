@@ -280,7 +280,7 @@ export default function App() {
               <TeacherCabinet teacher={teacher} dict={dict} lessons={lessons} period={period} setPeriod={setPeriod}
                 onLessonAdded={onLessonAdded} onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
             ) : (
-              <MyLessons teacherId={teacher.id} />
+              <MyLessons teacherId={teacher.id} onChanged={reloadLessons} />
             )}
           </>
         ) : (isOfficeManager || isSeniorOM) ? (

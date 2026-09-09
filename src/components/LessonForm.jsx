@@ -1,15 +1,21 @@
 import React, { useState } from 'react'
-import { X, Paperclip, Trash2, Plus } from 'lucide-react'
+import { X, Paperclip, Trash2, Plus, AlertTriangle } from 'lucide-react'
 import { C, todayStr } from '../lib/utils'
 import { inp, Field } from './ui'
-import { createLesson, updateLesson, deleteLesson, uploadPlan, saveAttendance } from '../lib/api'
+import { createOrGetLesson, updateLesson, deleteLesson, uploadPlan, saveAttendance } from '../lib/api'
 import AttendancePicker from './AttendancePicker'
 import GroupSearchSelect from './GroupSearchSelect'
 
 // Режимы: без lesson — создание; с lesson — редактирование.
 // teacherId нужен для создания (чей урок).
 export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, onDeleted }) {
-  const editing = !!lesson
+  // activeLesson — то, что РЕАЛЬНО сейчас редактируется в форме. Обычно
+  // совпадает с пропом lesson, но если при СОЗДАНИИ нового урока
+  // обнаружился уже существующий (см. conflict ниже) и пользователь
+  // нажал «Открыть занятие» — форма переключается на него сама, без
+  // участия родителя (ему не нужно ничего знать про этот сценарий).
+  const [activeLesson, setActiveLesson] = useState(lesson)
+  const editing = !!activeLesson
   const today = todayStr()
   // При РЕДАКТИРОВАНИИ существующего урока группа НЕ подставляется
   // автоматически, даже если lesson.group_id почему-то пуст — иначе
@@ -18,30 +24,57 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
   // группы остаётся только при СОЗДАНИИ нового урока — там это просто
   // удобное значение по умолчанию, а не подмена реальных данных.
   const [f, setF] = useState({
-    group_id: editing ? (lesson?.group_id || '') : (dict.groups[0]?.id || ''),
-    assistant_id: lesson?.assistant_id || '',
-    assistant2_id: lesson?.assistant2_id || '',
-    lesson_date: lesson?.lesson_date || today,
-    lessons_count: lesson?.lessons_count || 1,
-    topic: lesson?.topic || '',
-    students: lesson?.students ?? 8,
-    status: lesson?.status || 'проведён',
-    has_test: lesson?.has_test || false,
-    test_max_score: lesson?.test_max_score || '',
+    group_id: editing ? (activeLesson?.group_id || '') : (dict.groups[0]?.id || ''),
+    assistant_id: activeLesson?.assistant_id || '',
+    assistant2_id: activeLesson?.assistant2_id || '',
+    lesson_date: activeLesson?.lesson_date || today,
+    lessons_count: activeLesson?.lessons_count || 1,
+    topic: activeLesson?.topic || '',
+    students: activeLesson?.students ?? 8,
+    status: activeLesson?.status || 'проведён',
+    has_test: activeLesson?.has_test || false,
+    test_max_score: activeLesson?.test_max_score || '',
   })
-  const [showSecondAssistant, setShowSecondAssistant] = useState(!!lesson?.assistant2_id)
+  const [showSecondAssistant, setShowSecondAssistant] = useState(!!activeLesson?.assistant2_id)
   const [file, setFile] = useState(null)
   const [attendance, setAttendance] = useState([]) // [{ student_id, present }]
   const [saving, setSaving] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [err, setErr] = useState('')
+  // Урок, уже существующий в базе для той же группы+даты, найденный
+  // create_or_get_lesson при попытке создать новый (п.15-16 ТЗ) —
+  // отдельно от err, потому что это не ошибка, а нормальный сценарий
+  // со своим действием («Открыть занятие»), а не просто текстом.
+  const [conflict, setConflict] = useState(null)
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }))
   const valid = f.topic.trim() && f.group_id
+
+  // Пользователь согласился открыть уже существующий урок вместо
+  // создания нового — переключаем саму форму в режим редактирования
+  // найденного, без обращения к родительскому компоненту.
+  function openConflict() {
+    const l = conflict
+    setConflict(null)
+    setActiveLesson(l)
+    setF({
+      group_id: l.group_id || '',
+      assistant_id: l.assistant_id || '',
+      assistant2_id: l.assistant2_id || '',
+      lesson_date: l.lesson_date || today,
+      lessons_count: l.lessons_count || 1,
+      topic: l.topic || '',
+      students: l.students ?? 8,
+      status: l.status || 'проведён',
+      has_test: l.has_test || false,
+      test_max_score: l.test_max_score || '',
+    })
+    setShowSecondAssistant(!!l.assistant2_id)
+  }
 
   async function save() {
     setSaving(true); setErr('')
     try {
-      let plan_path = lesson?.plan_path ?? null
+      let plan_path = activeLesson?.plan_path ?? null
       if (file) plan_path = await uploadPlan(file, teacherId)
       const payload = {
         group_id: f.group_id,
@@ -58,9 +91,17 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
       }
       let saved
       if (editing) {
-        saved = await updateLesson(lesson.id, payload)
+        saved = await updateLesson(activeLesson.id, payload)
       } else {
-        saved = await createLesson({ ...payload, teacher_id: teacherId })
+        const result = await createOrGetLesson({ ...payload, teacher_id: teacherId })
+        if (!result.is_new) {
+          // Занятие для этой группы+даты уже есть — не создаём дубль,
+          // показываем найденное и предлагаем открыть его вместо ошибки.
+          setConflict(result)
+          setSaving(false)
+          return
+        }
+        saved = { id: result.id, ...payload, teacher_id: teacherId }
       }
       // Сохраняем посещаемость (для проведённого урока)
       if (f.status === 'проведён' && attendance.length) {
@@ -77,12 +118,59 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
   async function remove() {
     setSaving(true); setErr('')
     try {
-      await deleteLesson(lesson.id)
-      onDeleted(lesson.id)
+      await deleteLesson(activeLesson.id)
+      onDeleted(activeLesson.id)
     } catch (e) {
       setErr(e.message || 'Не удалось удалить урок')
       setSaving(false)
     }
+  }
+
+  // Найден уже существующий урок для этой группы+даты (п.15-16 ТЗ) —
+  // показываем это отдельным экраном вместо формы создания, вместо
+  // молчаливого создания дубля или голой текстовой ошибки.
+  if (conflict) {
+    const already = conflict.status === 'проведён'
+    // Найденный урок со статусом 'planned' пришёл из расписания и ещё
+    // не проведён — эта форма (Журнал) в принципе не умеет с ним
+    // работать, её выбор статуса — только «Проведён»/«Отменён»
+    // (это и была причина исходного бага «нет списка учеников», см.
+    // TeacherCabinet.jsx). Такой урок открывают и проводят ТОЛЬКО через
+    // «Мои занятия» — поэтому здесь не предлагаем «редактировать на
+    // месте», а прямо направляем в нужное место.
+    const isPlanned = conflict.status === 'planned'
+    return (
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 50 }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 420, padding: 24 }}>
+          <div className="rowflex" style={{ gap: 8, marginBottom: 12, color: '#9C6500' }}>
+            <AlertTriangle size={19} />
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Занятие уже существует</h3>
+          </div>
+          <p style={{ fontSize: 13.5, color: C.slate, margin: '0 0 4px' }}>
+            {already
+              ? 'Занятие за эту дату для этой группы уже проведено.'
+              : isPlanned
+                ? 'Это занятие уже есть в расписании и ещё не проведено. Проведите его во вкладке «Мои занятия» — там же можно отметить посещаемость.'
+                : 'Это занятие уже создано, но ещё не проведено.'}
+          </p>
+          <div style={{ marginTop: 12, padding: 12, background: C.grey, borderRadius: 11, fontSize: 13.5 }}>
+            <div><b>{f.lesson_date}</b></div>
+            <div>{dict.groups.find((g) => g.id === conflict.group_id)?.name || conflict.group_id}</div>
+            <div style={{ color: C.slate, marginTop: 2 }}>Статус: {conflict.status}</div>
+          </div>
+          <div className="rowflex" style={{ gap: 10, marginTop: 16 }}>
+            <button onClick={onClose} style={{ flex: 1, padding: 11, background: '#fff', color: C.slate, borderRadius: 10, fontSize: 13.5, fontWeight: 700, border: `1px solid ${C.line}`, cursor: 'pointer' }}>
+              Закрыть
+            </button>
+            {!isPlanned && (
+              <button onClick={openConflict} style={{ flex: 1, padding: 11, background: C.brand, color: '#fff', borderRadius: 10, fontSize: 13.5, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                Открыть занятие
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -162,7 +250,7 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
             <Field label="Посещаемость">
               <AttendancePicker
                 groupId={f.group_id}
-                lessonId={editing ? lesson.id : null}
+                lessonId={editing ? activeLesson.id : null}
                 hasTest={f.has_test}
                 onChange={(recs) => { setAttendance(recs); set('students', recs.filter((r) => r.present).length) }}
               />
@@ -171,10 +259,10 @@ export default function LessonForm({ teacherId, lesson, dict, onClose, onSaved, 
         )}
         <Field label="План урока">
           <label className="rowflex" style={{ gap: 8, padding: '10px 12px', border: `1px dashed ${C.line}`, borderRadius: 11, fontSize: 13, color: C.slate, cursor: 'pointer' }}>
-            <Paperclip size={15} /> {file?.name || (lesson?.plan_path ? 'Заменить файл плана' : 'Прикрепить файл (pdf, docx)')}
+            <Paperclip size={15} /> {file?.name || (activeLesson?.plan_path ? 'Заменить файл плана' : 'Прикрепить файл (pdf, docx)')}
             <input type="file" style={{ display: 'none' }} onChange={(e) => setFile(e.target.files[0] || null)} />
           </label>
-          {lesson?.plan_path && !file && <div style={{ fontSize: 12, color: C.ok, marginTop: 6 }}>Файл плана уже прикреплён</div>}
+          {activeLesson?.plan_path && !file && <div style={{ fontSize: 12, color: C.ok, marginTop: 6 }}>Файл плана уже прикреплён</div>}
         </Field>
 
         {err && <div style={{ color: '#c2360b', fontSize: 13, marginBottom: 10 }}>{err}</div>}

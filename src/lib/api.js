@@ -81,10 +81,31 @@ export async function fetchLessonTestInfo(lessonId) {
   return data || { has_test: false, test_max_score: null }
 }
 
-export async function createLesson(payload) {
-  const { data, error } = await supabase.from('lessons').insert(payload).select().single()
+// Ручное создание урока через Журнал («Добавить урок», LessonForm.jsx) —
+// ЕДИНСТВЕННАЯ точка входа для этого сценария (миграция 70). Раньше
+// здесь был обычный INSERT без какой-либо проверки на существование —
+// именно это позволяло создать дубль урока, если преподаватель не
+// заметил уже существующее (в т.ч. пришедшее из расписания) занятие
+// той же группы за тот же день. RPC сама ищет такое занятие и, если
+// находит, ничего не вставляет — возвращает найденное с is_new=false.
+export async function createOrGetLesson(payload) {
+  const { data, error } = await supabase.rpc('create_or_get_lesson', {
+    p_teacher_id: payload.teacher_id,
+    p_group_id: payload.group_id,
+    p_assistant_id: payload.assistant_id || null,
+    p_assistant2_id: payload.assistant2_id || null,
+    p_lesson_date: payload.lesson_date,
+    p_lessons_count: payload.lessons_count,
+    p_topic: payload.topic || '',
+    p_students: payload.students,
+    p_status: payload.status,
+    p_plan_path: payload.plan_path || null,
+    p_has_test: !!payload.has_test,
+    p_test_max_score: payload.test_max_score ?? null,
+  })
   if (error) throw error
-  return data
+  // RPC с returns table(...) отдаёт массив из одной строки.
+  return Array.isArray(data) ? data[0] : data
 }
 
 export async function updateLesson(id, patch) {

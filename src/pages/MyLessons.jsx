@@ -12,7 +12,13 @@ const STATUS_META = {
   отменён: { label: 'Отменено', color: C.slate, bg: C.grey },
 }
 
-export default function MyLessons({ teacherId }) {
+// onChanged — необязательный колбэк родителя (App.jsx), вызывается после
+// проведения/отмены занятия. Нужен, чтобы вкладка «Журнал» (у неё свой
+// отдельный, загруженный по периоду список lessons) сразу увидела
+// изменение статуса — без него занятие, проведённое здесь, оставалось
+// бы в «Журнале» невидимым до смены периода/перезахода (п.51 ТЗ,
+// ТЕСТ №3: после проведения занятие должно остаться в журнале).
+export default function MyLessons({ teacherId, onChanged }) {
   // todayStr()/addDaysStr() — локальные геттеры даты, не toISOString()
   // (который переводит в UTC и в ночные часы по Казахстану показал бы
   // вчерашний день — см. ТЗ про часовой пояс).
@@ -20,6 +26,7 @@ export default function MyLessons({ teacherId }) {
   const [rows, setRows] = useState(null)
   const [open, setOpen] = useState(null)   // занятие, которое проводим
   const [err, setErr] = useState('')
+  const [overdueExpanded, setOverdueExpanded] = useState(false)
 
   async function load() {
     setErr('')
@@ -31,31 +38,52 @@ export default function MyLessons({ teacherId }) {
   const shift = (d) => setDate(addDaysStr(date, d))
   const isToday = date === todayStr()
 
+  // Непроведённые занятия из ПРОШЛОГО (п.2-12 ТЗ) — get_my_lessons
+  // возвращает их ВСЕГДА, независимо от того, какой день сейчас
+  // просматривается (is_overdue считается от реального today, не от
+  // выбранной date), поэтому они не пропадают при переключении дня и
+  // не ограничены количеством прошедших дней. dayRows — то же самое,
+  // что раньше показывалось как «занятия на дату» (без него сюда бы
+  // задваивались уже показанные в блоке overdue строки, если дата
+  // видом совпала с прошлым днём — но по построению RPC они дают
+  // ОБЪЕДИНЕНИЕ через OR, а не пересечение, так что дубликатов и так
+  // не бывает: строка либо попадает в overdue, либо в «на дату», не в обе).
+  const overdueRows = (rows || []).filter((r) => r.is_overdue)
+  const dayRows = (rows || []).filter((r) => !r.is_overdue)
+  const overdueVisible = overdueExpanded ? overdueRows : overdueRows.slice(0, 6)
+
   // Фильтры «Моих занятий» (п.4 ТЗ) — только те, где реально есть выбор
   // (если у преподавателя в этот день один офис/предмет/группа — фильтр
-  // просто не показываем, чтобы не перегружать интерфейс).
+  // просто не показываем, чтобы не перегружать интерфейс). Считаются
+  // только от dayRows — блок «Непроведённые» им не подчиняется, он
+  // показывает вообще все просроченные занятия, а не только этого дня.
   const [officeF, setOfficeF] = useState('all')
   const [subjectF, setSubjectF] = useState('all')
   const [groupF, setGroupF] = useState('all')
   const [statusF, setStatusF] = useState('all')
   const [attentionF, setAttentionF] = useState(null) // 'noplan' | 'notopic' | null
 
-  if (open) {
-    return <ConductCard lesson={open} teacherId={teacherId} onBack={() => setOpen(null)}
-      onDone={async () => { setOpen(null); await load() }} />
+  async function afterConduct() {
+    setOpen(null)
+    await load()
+    await onChanged?.()
   }
 
-  const planned = (rows || []).filter((r) => r.status === 'planned')
-  const doneList = (rows || []).filter((r) => r.status === 'проведён')
-  const cancelledList = (rows || []).filter((r) => r.status === 'отменён')
+  if (open) {
+    return <ConductCard lesson={open} teacherId={teacherId} onBack={() => setOpen(null)} onDone={afterConduct} />
+  }
+
+  const planned = dayRows.filter((r) => r.status === 'planned')
+  const doneList = dayRows.filter((r) => r.status === 'проведён')
+  const cancelledList = dayRows.filter((r) => r.status === 'отменён')
   const noPlanList = doneList.filter((r) => !r.plan_path)
   const noTopicList = doneList.filter((r) => !r.topic?.trim())
 
-  const officeOptions = [...new Set((rows || []).map((r) => r.office).filter(Boolean))]
-  const subjectOptions = [...new Set((rows || []).map((r) => (r.subject_name || '').split(' / ')[0]).filter(Boolean))]
-  const groupOptions = [...new Set((rows || []).map((r) => r.group_name).filter(Boolean))]
+  const officeOptions = [...new Set(dayRows.map((r) => r.office).filter(Boolean))]
+  const subjectOptions = [...new Set(dayRows.map((r) => (r.subject_name || '').split(' / ')[0]).filter(Boolean))]
+  const groupOptions = [...new Set(dayRows.map((r) => r.group_name).filter(Boolean))]
 
-  const visibleRows = (rows || []).filter((r) => {
+  const visibleRows = dayRows.filter((r) => {
     if (officeF !== 'all' && r.office !== officeF) return false
     if (subjectF !== 'all' && (r.subject_name || '').split(' / ')[0] !== subjectF) return false
     if (groupF !== 'all' && r.group_name !== groupF) return false
@@ -86,7 +114,47 @@ export default function MyLessons({ teacherId }) {
         </div>
       </div>
 
-      {rows !== null && rows.length > 0 && (
+      {/* Непроведённые занятия из прошлого (п.4,26,28 ТЗ) — не привязаны
+          к выбранному дню и не пропадают, пока их не проведут/отменят.
+          Блок вообще не рендерится, если таких занятий нет (п.29 ТЗ). */}
+      {overdueRows.length > 0 && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 13, padding: 14, marginBottom: 16 }}>
+          <div className="rowflex" style={{ gap: 7, color: '#92400e', fontWeight: 800, fontSize: 13.5, marginBottom: 10 }}>
+            <AlertTriangle size={16} /> Непроведённые занятия: {overdueRows.length}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {overdueVisible.map((l) => (
+              <div key={l.lesson_id} onClick={() => setOpen(l)}
+                className="rowflex" style={{ gap: 10, flexWrap: 'wrap', background: '#fff', border: '1px solid #fde68a', borderRadius: 11, padding: '10px 13px', cursor: 'pointer' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="rowflex" style={{ gap: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: '#92400e' }}>
+                      {new Date(l.lesson_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+                    </span>
+                    {l.time_text && <span style={{ fontSize: 11.5, color: C.slate }}>{l.time_text}</span>}
+                    <span style={{ fontSize: 15, fontWeight: 800 }}>{l.group_name}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: C.slate, marginTop: 2 }}>
+                    {(l.subject_name || '').split(' / ')[0]} · {l.lessons_count} урока
+                  </div>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); setOpen(l) }}
+                  style={{ padding: '9px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', background: C.brand, color: '#fff' }}>
+                  Провести
+                </button>
+              </div>
+            ))}
+          </div>
+          {overdueRows.length > overdueVisible.length && (
+            <button onClick={() => setOverdueExpanded(true)}
+              style={{ marginTop: 8, border: 'none', background: 'none', color: '#92400e', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+              Показать ещё {overdueRows.length - overdueVisible.length}
+            </button>
+          )}
+        </div>
+      )}
+
+      {dayRows.length > 0 && (
         <div className="rowflex" style={{ gap: 7, marginBottom: 10, flexWrap: 'wrap' }}>
           <MiniBadge n={planned.length} label="к проведению" color={C.brand} bg={C.brandSoft} onClick={() => setStatusF(statusF === 'planned' ? 'all' : 'planned')} active={statusF === 'planned'} />
           <MiniBadge n={doneList.length} label="проведено" color={C.ok} bg={C.okSoft} onClick={() => setStatusF(statusF === 'проведён' ? 'all' : 'проведён')} active={statusF === 'проведён'} />
@@ -137,7 +205,7 @@ export default function MyLessons({ teacherId }) {
 
       {rows === null ? (
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
-      ) : rows.length === 0 ? (
+      ) : dayRows.length === 0 ? (
         <div style={{ padding: 50, textAlign: 'center', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>
           <CalendarDays size={30} color={C.faint} style={{ marginBottom: 10 }} />
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>На этот день занятий нет</div>
