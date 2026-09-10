@@ -18,7 +18,7 @@ const STATUS_META = {
 // изменение статуса — без него занятие, проведённое здесь, оставалось
 // бы в «Журнале» невидимым до смены периода/перезахода (п.51 ТЗ,
 // ТЕСТ №3: после проведения занятие должно остаться в журнале).
-export default function MyLessons({ teacherId, onChanged }) {
+export default function MyLessons({ teacherId, onChanged, dict }) {
   // todayStr()/addDaysStr() — локальные геттеры даты, не toISOString()
   // (который переводит в UTC и в ночные часы по Казахстану показал бы
   // вчерашний день — см. ТЗ про часовой пояс).
@@ -70,7 +70,7 @@ export default function MyLessons({ teacherId, onChanged }) {
   }
 
   if (open) {
-    return <ConductCard lesson={open} teacherId={teacherId} onBack={() => setOpen(null)} onDone={afterConduct} />
+    return <ConductCard lesson={open} teacherId={teacherId} dict={dict} onBack={() => setOpen(null)} onDone={afterConduct} />
   }
 
   const planned = dayRows.filter((r) => r.status === 'planned')
@@ -288,12 +288,18 @@ export default function MyLessons({ teacherId, onChanged }) {
 }
 
 // ---------- КАРТОЧКА ПРОВЕДЕНИЯ ЗАНЯТИЯ ----------
-function ConductCard({ lesson, teacherId, onBack, onDone }) {
+function ConductCard({ lesson, teacherId, dict, onBack, onDone }) {
+  const assistants = dict?.assistants || []
   const [students, setStudents] = useState(null)
   const [marks, setMarks] = useState({})       // { studentId: {status, reason} }
   const [topic, setTopic] = useState(lesson.topic || '')
   const [comment, setComment] = useState('')
   const [count, setCount] = useState(lesson.lessons_count || 2)
+  // Ассистенты (миграция 73) — приходят из lesson (в т.ч. унаследованы
+  // из расписания через assistant_id), можно поменять/добавить второго
+  // прямо здесь при проведении.
+  const [assistantId, setAssistantId] = useState(lesson.assistant_id || '')
+  const [assistant2Id, setAssistant2Id] = useState(lesson.assistant2_id || '')
   const [hasTest, setHasTest] = useState(false)
   const [maxScore, setMaxScore] = useState('')
   const [planPath, setPlanPath] = useState(lesson.plan_path || null)
@@ -374,6 +380,8 @@ function ConductCard({ lesson, teacherId, onBack, onDone }) {
         has_test: hasTest,
         test_max_score: hasTest ? (Number(maxScore) || null) : null,
         plan_path: finalPlanPath,
+        assistant_id: assistantId || null,
+        assistant2_id: assistant2Id || null,
         attendance: (students || []).map((s) => ({
           student_id: s.id,
           status: marks[s.id]?.status || 'present',
@@ -414,7 +422,6 @@ function ConductCard({ lesson, teacherId, onBack, onDone }) {
         </div>
         <div style={{ fontSize: 13, color: C.slate }}>
           {(lesson.subject_name || '').split(' / ')[0]} · {lesson.office}
-          {lesson.assistant_name && ` · ассистент: ${lesson.assistant_name}`}
         </div>
 
         <div style={{ display: 'flex', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
@@ -435,6 +442,25 @@ function ConductCard({ lesson, teacherId, onBack, onDone }) {
                   }}>{n}</button>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 200px' }}>
+            <Label>Ассистент на занятии</Label>
+            <select value={assistantId} onChange={(e) => setAssistantId(e.target.value)}
+              style={{ width: '100%', padding: '10px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13.5, outline: 'none', background: '#fff' }}>
+              <option value="">Без ассистента</option>
+              {assistants.filter((a) => a.id !== assistant2Id).map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: '1 1 200px' }}>
+            <Label>Второй ассистент</Label>
+            <select value={assistant2Id} onChange={(e) => setAssistant2Id(e.target.value)}
+              style={{ width: '100%', padding: '10px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13.5, outline: 'none', background: '#fff' }}>
+              <option value="">Без второго ассистента</option>
+              {assistants.filter((a) => a.id !== assistantId).map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+            </select>
           </div>
         </div>
 

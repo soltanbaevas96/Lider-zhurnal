@@ -841,7 +841,7 @@ export async function fetchLessonPlansOverview(period) {
 }
 
 // Провести занятие: тема + посещаемость + статус (+ баллы за тест, если был)
-export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance, has_test, test_max_score, plan_path }) {
+export async function conductLesson(lessonId, { topic, comment, lessons_count, attendance, has_test, test_max_score, plan_path, assistant_id, assistant2_id }) {
   const patch = {
     topic: topic || '',
     comment: comment || null,
@@ -854,6 +854,10 @@ export async function conductLesson(lessonId, { topic, comment, lessons_count, a
   // plan_path необязателен — если не передан, поле не трогаем (не затираем
   // уже прикреплённый план, если сохраняем без изменений в нём).
   if (plan_path !== undefined) patch.plan_path = plan_path
+  // Ассистенты — тоже необязательны в вызове; если переданы (форма
+  // проведения в «Мои занятия», миграция 73), сохраняем. '' → null.
+  if (assistant_id !== undefined) patch.assistant_id = assistant_id || null
+  if (assistant2_id !== undefined) patch.assistant2_id = assistant2_id || null
   const { error: le } = await supabase.from('lessons').update(patch).eq('id', lessonId)
   if (le) throw le
 
