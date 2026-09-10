@@ -104,8 +104,11 @@ export async function createOrGetLesson(payload) {
     p_test_max_score: payload.test_max_score ?? null,
   })
   if (error) throw error
-  // RPC с returns table(...) отдаёт массив из одной строки.
-  return Array.isArray(data) ? data[0] : data
+  // RPC returns jsonb (миграция 72) — вся строка урока как есть + is_new.
+  // Раньше был returns table(...) с явными типами колонок, из-за чего
+  // Postgres падал с "structure of query does not match function result
+  // type" (фактические типы колонок lessons не совпадали с объявлением).
+  return data
 }
 
 export async function updateLesson(id, patch) {
