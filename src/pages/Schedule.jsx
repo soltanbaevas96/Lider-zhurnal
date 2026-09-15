@@ -142,6 +142,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
 
   const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, start_time, end_time } для нового с предзаполнением
   const [confirmDel, setConfirmDel] = useState(null) // id слота на удаление
+  const [confirmSync, setConfirmSync] = useState(false)
   const [delImpact, setDelImpact] = useState(null)   // { future_count, conducted_count } для диалога подтверждения (п.27 ТЗ)
   const [gen, setGen] = useState(false)
   const [excelOpen, setExcelOpen] = useState(false)
@@ -279,14 +280,25 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
     finally { setBusy(false) }
   }
 
-  // «Синхронизировать» (п.21 ТЗ) — защитный пересчёт будущих занятий по
-  // всем активным слотам сразу, для уже существующих (созданных раньше)
-  // данных. Проведённые занятия не трогает никогда.
+  // «Синхронизировать» — защитный пересчёт будущих занятий по всем
+  // активным слотам сразу, для уже существующих (созданных раньше)
+  // данных. Доступна и завучу, и методисту (canEditSlots) — сама
+  // синхронизация работает с расписанием, а не с тем, кто её запустил
+  // (ТЗ «Синхронизация расписания методистами»): результат не зависит
+  // от роли нажавшего. Проведённые занятия не трогает никогда.
   async function runSync() {
+    setConfirmSync(false)
     setSyncBusy(true); setErr('')
     try {
       const r = await syncAllSchedules()
-      setMsg(`Синхронизация завершена. Проверено слотов: ${r?.slots_processed ?? 0}. Будущих занятий пересоздано: ${r?.future_created ?? 0}. Устаревших удалено: ${r?.future_deleted ?? 0}.`)
+      const parts = [
+        `Проверено слотов: ${r?.slots_processed ?? 0}.`,
+        `Будущих занятий пересоздано: ${r?.future_created ?? 0}.`,
+        `Устаревших удалено: ${r?.future_deleted ?? 0}.`,
+        `Проведённых занятий не изменено: ${r?.conducted_protected ?? 0}.`,
+      ]
+      if (r?.errors) parts.push(`Пропущено из-за ошибок: ${r.errors} — проверьте эти слоты вручную.`)
+      setMsg(`Синхронизация завершена. ${parts.join(' ')}`)
       await load()
       setTimeout(() => setMsg(''), 10000)
     } catch (e) { setErr(e.message) }
@@ -407,11 +419,17 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
                 style={{ gap: 6, padding: '8px 14px', background: C.teal, color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
                 <Zap size={15} /> Создать занятия
               </button>
-              <button onClick={runSync} disabled={syncBusy} className="rowflex" title="Пересчитать будущие занятия по всем слотам (проведённые не трогает)"
-                style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: syncBusy ? 0.6 : 1 }}>
-                <RotateCw size={15} /> {syncBusy ? 'Синхронизирую…' : 'Синхронизировать'}
-              </button>
             </>
+          )}
+          {/* Синхронизация — не только у завуча (isAdmin), но и у методиста
+              (canEditSlots): сама операция работает с расписанием, а не с
+              ролью нажавшего, результат одинаков независимо от того, кто
+              её запустил (ТЗ «Синхронизация расписания методистами»). */}
+          {canEditSlots && (
+            <button onClick={() => setConfirmSync(true)} disabled={syncBusy} className="rowflex" title="Пересчитать будущие занятия по всем слотам (проведённые не трогает)"
+              style={{ gap: 6, padding: '8px 14px', background: '#fff', color: C.slate, border: `1px solid ${C.line}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: syncBusy ? 0.6 : 1 }}>
+              <RotateCw size={15} /> {syncBusy ? 'Синхронизирую…' : 'Синхронизировать'}
+            </button>
           )}
           {canEditSlots && !teacherActive && (
             <button onClick={() => setEditSlot('new')} className="rowflex"
@@ -590,6 +608,20 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
           ) : (
             <p style={{ fontSize: 13.5, color: C.slate, margin: 0 }}>Проверяю связанные занятия…</p>
           )}
+        </ConfirmBox>
+      )}
+
+      {confirmSync && (
+        <ConfirmBox
+          title="Синхронизировать расписание?"
+          busy={syncBusy}
+          onCancel={() => setConfirmSync(false)}
+          onConfirm={runSync}
+          confirmText="Синхронизировать">
+          <p style={{ fontSize: 13.5, color: C.slate, margin: 0, lineHeight: 1.6 }}>
+            Будущие и непроведённые занятия будут приведены в соответствие с текущим расписанием (время, преподаватель, ассистент, группа).<br />
+            Проведённые занятия изменены не будут.
+          </p>
         </ConfirmBox>
       )}
 
