@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Check, X, Clock, Wifi, RotateCcw, ArrowLeft, Ban, Paperclip, AlertTriangle,
 } from 'lucide-react'
-import { fetchMyLessons, fetchStudentsOfGroup, fetchAttendance, fetchLessonTestInfo, conductLesson, cancelLesson, planUrl, uploadPlan } from '../lib/api'
+import { fetchMyLessons, fetchStudentsOfGroup, fetchStudentsByIds, fetchAttendance, fetchLessonTestInfo, conductLesson, cancelLesson, planUrl, uploadPlan } from '../lib/api'
 import { ST, REASONS } from '../components/AttendancePicker'
 import { C, todayStr, addDaysStr } from '../lib/utils'
 
@@ -323,13 +323,34 @@ function ConductCard({ lesson, teacherId, dict, onBack, onDone }) {
       fetchStudentsOfGroup(lesson.group_id),
       fetchAttendance(lesson.lesson_id).catch(() => []),
       fetchLessonTestInfo(lesson.lesson_id).catch(() => ({ has_test: false, test_max_score: null })),
-    ]).then(([list, saved, testInfo]) => {
+    ]).then(async ([list, saved, testInfo]) => {
       if (stop) return
-      setStudents(list)
+      // Если посещаемость для этого урока уже сохранялась (проведён и
+      // теперь открыт «Изменить») — состав фиксирован на тот момент, а
+      // не текущим составом группы: ученика, добавленного в группу
+      // позже, тут быть не должно; убранного из группы — наоборот,
+      // нужно продолжать показывать (его уже нет в live-списке group,
+      // подтягиваем отдельно по id). Для ещё не проведённого урока
+      // (planned, первое открытие) используем текущий состав — саved
+      // тогда пуст и effectiveList = list, как и раньше.
+      let effectiveList = list
+      if (saved.length) {
+        const byId = {}
+        list.forEach((s) => { byId[s.id] = s })
+        const missingIds = saved.map((a) => a.student_id).filter((id) => !byId[id])
+        if (missingIds.length) {
+          const missing = await fetchStudentsByIds(missingIds).catch(() => [])
+          missing.forEach((s) => { byId[s.id] = s })
+        }
+        effectiveList = saved.map((a) => byId[a.student_id]).filter(Boolean)
+          .sort((a, b) => a.full_name.localeCompare(b.full_name))
+      }
+      if (stop) return
+      setStudents(effectiveList)
       setHasTest(!!testInfo.has_test)
       setMaxScore(testInfo.test_max_score ?? '')
       const init = {}
-      list.forEach((s) => { init[s.id] = { status: 'present', reason: null, score: '' } })
+      effectiveList.forEach((s) => { init[s.id] = { status: 'present', reason: null, score: '' } })
       saved.forEach((a) => {
         init[a.student_id] = {
           status: a.status || (a.present ? 'present' : 'absent'),

@@ -284,7 +284,7 @@ export default function App() {
               <TeacherCabinet teacher={teacher} dict={dict} lessons={lessons} period={period} setPeriod={setPeriod}
                 onLessonAdded={onLessonAdded} onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
             ) : view === 'manage' ? (
-              <TeacherGroupsTab teacher={teacher} dict={dict} />
+              <TeacherGroupsTab dict={dict} />
             ) : view === 'schedule' ? (
               <Schedule dict={dict} isAdmin={false} canEdit={false} readOnly onFullBleed={setScheduleFullBleed} />
             ) : (

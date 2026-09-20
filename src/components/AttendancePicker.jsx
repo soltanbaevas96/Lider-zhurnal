@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Check, X as XIcon, Clock, Wifi, RotateCcw } from 'lucide-react'
-import { fetchStudentsOfGroup, fetchAttendance } from '../lib/api'
+import { fetchStudentsOfGroup, fetchStudentsByIds, fetchAttendance } from '../lib/api'
 import { C } from '../lib/utils'
 
 // 5 статусов посещаемости (единые для всей системы)
@@ -37,22 +37,41 @@ export default function AttendancePicker({ groupId, lessonId, hasTest, onChange 
     ;(async () => {
       try {
         const list = await fetchStudentsOfGroup(groupId)
+        const saved = lessonId ? await fetchAttendance(lessonId).catch(() => []) : []
+
+        // Если у урока УЖЕ есть сохранённая посещаемость — состав
+        // фиксирован на момент того сохранения, а не текущим составом
+        // группы (п.9,12 ТЗ, ТЕСТ №9): ученика, добавленного в группу
+        // позже, в старом уроке быть не должно; ученика, которого с тех
+        // пор убрали из группы, наоборот, нужно ПРОДОЛЖАТЬ показывать —
+        // его в live-составе группы уже нет, поэтому недостающих
+        // подтягиваем отдельно по id. Если посещаемость ещё не
+        // сохранялась (новый урок или старая запись без истории) —
+        // используем текущий состав группы, как и раньше.
+        let effectiveList = list
+        if (saved.length) {
+          const byId = {}
+          list.forEach((s) => { byId[s.id] = s })
+          const missingIds = saved.map((r) => r.student_id).filter((id) => !byId[id])
+          if (missingIds.length) {
+            const missing = await fetchStudentsByIds(missingIds)
+            missing.forEach((s) => { byId[s.id] = s })
+          }
+          effectiveList = saved.map((r) => byId[r.student_id]).filter(Boolean)
+            .sort((a, b) => a.full_name.localeCompare(b.full_name))
+        }
         if (cancelled) return
-        setStudents(list)
+        setStudents(effectiveList)
 
         const init = {}
-        list.forEach((s) => { init[s.id] = { status: 'present', reason: null, score: '' } })
-
-        if (lessonId) {
-          const saved = await fetchAttendance(lessonId).catch(() => [])
-          saved.forEach((r) => {
-            init[r.student_id] = {
-              status: r.status || (r.present ? 'present' : 'absent'),
-              reason: r.absence_reason || null,
-              score: r.score ?? '',
-            }
-          })
-        }
+        effectiveList.forEach((s) => { init[s.id] = { status: 'present', reason: null, score: '' } })
+        saved.forEach((r) => {
+          init[r.student_id] = {
+            status: r.status || (r.present ? 'present' : 'absent'),
+            reason: r.absence_reason || null,
+            score: r.score ?? '',
+          }
+        })
         if (!cancelled) setMarks(init)
       } catch (e) {
         // Ошибку не маскируем под «пустую группу» (п.18 ТЗ) — показываем

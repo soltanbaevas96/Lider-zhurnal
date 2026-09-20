@@ -257,15 +257,34 @@ export async function fetchMyGroupsAndSubjects(teacherId) {
 }
 
 // ---------- УЧЕНИКИ И ПОСЕЩАЕМОСТЬ ----------
-// Ученики конкретной группы (активные)
+// Ученики конкретной группы (активные, ТЕКУЩИЙ состав). Для уже
+// проведённого занятия список посещаемости строится НЕ отсюда — см.
+// fetchStudentsByIds ниже и её использование в AttendancePicker/
+// ConductCard: состав проведённого урока обязан оставаться историческим,
+// а не «подтягивать» тех, кого добавили в группу уже после урока.
 export async function fetchStudentsOfGroup(groupId) {
   const { data, error } = await supabase
     .from('student_groups')
-    .select('students(id, full_name, archived)')
+    .select('students(id, full_name, school, grade, phone, archived)')
     .eq('group_id', groupId)
   if (error) throw error
   return data.map((r) => r.students).filter((s) => s && !s.archived)
     .sort((a, b) => a.full_name.localeCompare(b.full_name))
+}
+
+// Ученики по конкретным ID — не через членство в группе. Нужна для
+// восстановления состава УЖЕ ПРОВЕДЁННОГО занятия: ученик мог с тех
+// пор уйти из группы (или наоборот, кого-то добавили после урока) —
+// историческая посещаемость должна показывать именно тех, кто РЕАЛЬНО
+// был отмечен на этом уроке, а не текущий состав группы. Архивных
+// учеников НЕ фильтруем — если у него уже есть история, она должна
+// остаться видна.
+export async function fetchStudentsByIds(ids) {
+  if (!ids?.length) return []
+  const { data, error } = await supabase.from('students')
+    .select('id, full_name, school, grade, phone, archived').in('id', ids)
+  if (error) throw error
+  return data || []
 }
 
 // Текущая посещаемость урока: массив { student_id, present }
@@ -422,27 +441,37 @@ export async function deleteStudent(id) {
   if (error) throw error
 }
 
-// Добавить/убрать ученика в группе (по одной связи)
+// Добавить/убрать/перевести ученика в группе — единая точка входа для
+// ВСЕХ ролей (методист/завуч из MethodistCabinet.jsx, любой
+// преподаватель из TeacherGroupsTab.jsx), через проверенные RPC
+// (миграция 77), а не прямой INSERT/DELETE в student_groups с
+// расчётом только на RLS таблицы. Идемпотентность — ON CONFLICT DO
+// NOTHING внутри RPC (на уже существующий uq_student_group), а не
+// разбор текста ошибки на фронте.
 export async function addStudentToGroup(studentId, groupId) {
-  const { error } = await supabase.from('student_groups')
-    .insert({ student_id: studentId, group_id: groupId })
-  if (error && /duplicate/i.test(error.message)) return
-  if (error && /row-level security/i.test(error.message)) {
-    throw new Error('Недостаточно прав добавить ученика в эту группу')
-  }
+  const { error } = await supabase.rpc('teacher_add_student_to_group', { p_student_id: studentId, p_group_id: groupId })
   if (error) throw error
 }
 export async function removeStudentFromGroup(studentId, groupId) {
-  // .select() — чтобы отличить реальное удаление от тихого запрета RLS
-  // (миграция 76): DELETE, не подходящий ни под одну политику, не
-  // поднимает ошибку сам по себе, просто не находит строк — без этой
-  // проверки такой запрет выглядел бы как «успех», хотя ничего не
-  // произошло (актуально для преподавателя, если он почему-то пытается
-  // убрать ученика из уже не своей группы).
-  const { data, error } = await supabase.from('student_groups')
-    .delete().eq('student_id', studentId).eq('group_id', groupId).select()
+  const { error } = await supabase.rpc('teacher_remove_student_from_group', { p_student_id: studentId, p_group_id: groupId })
   if (error) throw error
-  if (!data || data.length === 0) throw new Error('Не удалось убрать ученика из группы — недостаточно прав или связь уже удалена')
+}
+// Перевод — убрать старую связь + поставить новую одной атомарной RPC
+// (остальные предметные группы ученика не трогает — можно состоять
+// одновременно в нескольких).
+export async function transferStudentGroup(studentId, oldGroupId, newGroupId) {
+  const { error } = await supabase.rpc('teacher_move_student_to_group', {
+    p_student_id: studentId, p_old_group_id: oldGroupId, p_new_group_id: newGroupId,
+  })
+  if (error) throw error
+}
+
+// Все связи ученик-группа разом (только id-пары, для подсчёта
+// «сколько учеников в группе» в списке групп «Управление» без похода
+// за полным составом каждой группы по отдельности) — student_groups
+// уже открыта на чтение любому авторизованному сотруднику.
+export async function fetchAllStudentGroupLinks() {
+  return fetchAllPages(() => supabase.from('student_groups').select('student_id, group_id').order('student_id').order('group_id'))
 }
 // Все ученики (для поиска при добавлении в группу)
 export async function fetchAllStudents() {
