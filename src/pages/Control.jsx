@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import {
   Bell, History, CalendarX, AlertTriangle, Cake, FileWarning, RefreshCw, User, FileText, ExternalLink,
-  ArrowLeft, GraduationCap, Users, Layers,
+  ArrowLeft, GraduationCap, Users, Layers, ListChecks, X, Copy, Download, Check,
 } from 'lucide-react'
-import { fetchNotifications, fetchAuditLog, fetchMissedLessons, fetchLessonPlansOverview, planUrl } from '../lib/api'
+import {
+  fetchNotifications, fetchAuditLog, fetchMissedLessons, fetchLessonPlansOverview, planUrl,
+  runControlChecks, fetchControlTasks, updateControlTask,
+} from '../lib/api'
 import { C, fmtDate, nameOf, periodRange, currentMonth } from '../lib/utils'
 import DataTable from '../components/DataTable'
 import PeriodPicker from '../components/PeriodPicker'
@@ -21,7 +25,7 @@ const TABLES = {
 }
 
 export default function Control({ dict, onOpenStudent }) {
-  const [tab, setTab] = useState('alerts')  // alerts | missed | log | plans
+  const [tab, setTab] = useState('daily')  // daily | alerts | missed | log | plans
   const [alerts, setAlerts] = useState(null)
   const [missed, setMissed] = useState([])
   const [log, setLog] = useState([])
@@ -43,6 +47,7 @@ export default function Control({ dict, onOpenStudent }) {
   useEffect(() => { load() }, [])
 
   const tabs = [
+    { k: 'daily', t: 'Задачи к исправлению', n: null, icon: ListChecks },
     { k: 'alerts', t: 'Уведомления', n: alerts?.length || 0, icon: Bell },
     { k: 'missed', t: 'Не проведено', n: missed.length, icon: CalendarX },
     { k: 'plans', t: 'Планы уроков', n: null, icon: FileText },
@@ -58,7 +63,7 @@ export default function Control({ dict, onOpenStudent }) {
             Что требует внимания и кто что менял в системе
           </p>
         </div>
-        {tab !== 'plans' && (
+        {tab !== 'plans' && tab !== 'daily' && (
           <button onClick={load} disabled={loading} className="rowflex"
             style={{ gap: 6, padding: '8px 14px', background: C.grey, color: C.slate, borderRadius: 9, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
             <RefreshCw size={15} /> Обновить
@@ -91,7 +96,9 @@ export default function Control({ dict, onOpenStudent }) {
 
       {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
 
-      {tab === 'plans' ? (
+      {tab === 'daily' ? (
+        <DailyControl dict={dict} onOpenStudent={onOpenStudent} />
+      ) : tab === 'plans' ? (
         <PlansCheck dict={dict} />
       ) : loading ? (
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
@@ -104,6 +111,343 @@ export default function Control({ dict, onOpenStudent }) {
       )}
     </div>
   )
+}
+
+// ---------- ЕЖЕДНЕВНЫЙ КОНТРОЛЬ (control_tasks) ----------
+const PRIO = {
+  critical: { label: 'Критично', color: '#dc2626', bg: '#fee2e2' },
+  important: { label: 'Важно', color: '#d97706', bg: '#fef3c7' },
+  info: { label: 'Информация', color: '#0369a1', bg: '#e0f2fe' },
+}
+const STATUS = {
+  new: { label: 'Новая', color: '#0369a1', bg: '#e0f2fe' },
+  assigned: { label: 'Назначена', color: '#7c3aed', bg: '#ede9fe' },
+  in_progress: { label: 'В работе', color: '#d97706', bg: '#fef3c7' },
+  resolved: { label: 'Исправлена', color: '#16a34a', bg: '#dcfce7' },
+  verified: { label: 'Проверена', color: '#0f766e', bg: '#ccfbf1' },
+  rejected: { label: 'Отклонена', color: '#64748b', bg: '#f1f5f9' },
+}
+const ROLE_LABEL = { teacher: 'Преподаватель', curator: 'Куратор', office_manager: 'Офис-менеджер', methodist: 'Методист', accountant: 'Бухгалтер' }
+const CATEGORY_LABEL = { teacher: 'Преподаватели', curator: 'Кураторы', students: 'Ученики/группы', schedule: 'Расписание' }
+const ACTIVE_STATUSES = ['new', 'assigned', 'in_progress']
+const selectStyle = { padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13, background: '#fff', color: C.slate, cursor: 'pointer' }
+
+function responsibleName(row, dict) {
+  if (row.responsible_user_id) {
+    const t = (dict.teachers || []).find((x) => x.profile_id === row.responsible_user_id)
+    if (t) return t.full_name
+    const c = (dict.curators || []).find((x) => x.profile_id === row.responsible_user_id)
+    if (c) return c.full_name
+  }
+  const label = ROLE_LABEL[row.responsible_role] || row.responsible_role || '—'
+  return row.office ? `${label} · ${row.office}` : label
+}
+
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function DailyControl({ dict, onOpenStudent }) {
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [checking, setChecking] = useState(false)
+  const [err, setErr] = useState('')
+  const [detail, setDetail] = useState(null)
+  const [flt, setFlt] = useState({ priority: 'all', status: 'active', category: 'all', office: 'all', q: '' })
+
+  async function load() {
+    setLoading(true); setErr('')
+    try { setTasks(await fetchControlTasks()) }
+    catch (e) { setErr(e.message) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [])
+
+  async function runCheck() {
+    setChecking(true); setErr('')
+    try {
+      const res = await runControlChecks()
+      await load()
+      const parts = []
+      if (res?.critical_count) parts.push(`критично: ${res.critical_count}`)
+      if (res?.important_count) parts.push(`важно: ${res.important_count}`)
+      if (res?.info_count) parts.push(`информация: ${res.info_count}`)
+      alert(`Проверка завершена. Активных задач: ${res?.total_active ?? '—'}${parts.length ? ' (' + parts.join(', ') + ')' : ''}.${res?.auto_resolved ? ` Автоматически закрыто (проблема исчезла): ${res.auto_resolved}.` : ''}`)
+    } catch (e) { setErr(e.message) }
+    finally { setChecking(false) }
+  }
+
+  async function saveTask(id, patch) {
+    try {
+      await updateControlTask(id, patch)
+      setTasks((prev) => prev.map((t) => t.id === id ? { ...t, ...patch } : t))
+    } catch (e) { setErr(e.message) }
+  }
+
+  const offices = useMemo(() => Array.from(new Set(tasks.map((t) => t.office).filter(Boolean))).sort(), [tasks])
+
+  const filtered = useMemo(() => tasks.filter((t) => {
+    if (flt.priority !== 'all' && t.priority !== flt.priority) return false
+    if (flt.status === 'active' ? !ACTIVE_STATUSES.includes(t.status) : flt.status !== 'all' && t.status !== flt.status) return false
+    if (flt.category !== 'all' && t.category !== flt.category) return false
+    if (flt.office !== 'all' && t.office !== flt.office) return false
+    if (flt.q) {
+      const q = flt.q.toLowerCase()
+      if (!(t.title?.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q))) return false
+    }
+    return true
+  }), [tasks, flt])
+
+  const active = tasks.filter((t) => ACTIVE_STATUSES.includes(t.status))
+  const counts = {
+    critical: active.filter((t) => t.priority === 'critical').length,
+    important: active.filter((t) => t.priority === 'important').length,
+    info: active.filter((t) => t.priority === 'info').length,
+    overdue: active.filter((t) => t.due_date && t.due_date < todayStr()).length,
+  }
+
+  const columns = [
+    {
+      key: 'priority', label: '', width: 110, sortValue: (r) => ({ critical: 0, important: 1, info: 2 }[r.priority] ?? 3),
+      render: (r) => {
+        const p = PRIO[r.priority] || PRIO.info
+        return <span style={{ fontSize: 11, fontWeight: 800, padding: '3px 9px', borderRadius: 20, color: p.color, background: p.bg }}>{p.label}</span>
+      },
+    },
+    {
+      key: 'title', label: 'Проблема', render: (r) => (
+        <div>
+          <b>{r.title}</b>
+          {r.due_date && ACTIVE_STATUSES.includes(r.status) && r.due_date < todayStr() && (
+            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: '#dc2626' }}>просрочено</span>
+          )}
+        </div>
+      ),
+    },
+    { key: 'responsible', label: 'Ответственный', sortValue: (r) => responsibleName(r, dict), render: (r) => responsibleName(r, dict) },
+    { key: 'office', label: 'Офис', width: 130, render: (r) => r.office || '—' },
+    { key: 'due_date', label: 'Срок', width: 100, render: (r) => r.due_date ? fmtDate(r.due_date) : '—' },
+    {
+      key: 'status', label: 'Статус', width: 130,
+      render: (r) => {
+        const s = STATUS[r.status] || STATUS.new
+        return <span style={{ fontSize: 11, fontWeight: 800, padding: '3px 9px', borderRadius: 20, color: s.color, background: s.bg }}>{s.label}</span>
+      },
+    },
+  ]
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <button onClick={runCheck} disabled={checking} className="rowflex"
+          style={{ gap: 7, padding: '10px 16px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 13.5, fontWeight: 700, border: 'none', cursor: checking ? 'default' : 'pointer' }}>
+          <RefreshCw size={15} /> {checking ? 'Проверяем…' : 'Проверить сейчас'}
+        </button>
+        <button onClick={load} disabled={loading} className="rowflex"
+          style={{ gap: 6, padding: '10px 14px', background: C.grey, color: C.slate, borderRadius: 11, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
+          <RefreshCw size={15} /> Обновить список
+        </button>
+        <button onClick={() => copyReport(tasks, dict)} disabled={!active.length} className="rowflex"
+          style={{ gap: 6, padding: '10px 14px', background: '#fff', color: active.length ? C.slate : C.faint, border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13, fontWeight: 700, cursor: active.length ? 'pointer' : 'default' }}>
+          <Copy size={14} /> Скопировать отчёт (WhatsApp)
+        </button>
+        <button onClick={() => exportExcel(tasks, dict)} disabled={!tasks.length} className="rowflex"
+          style={{ gap: 6, padding: '10px 14px', background: '#fff', color: tasks.length ? C.slate : C.faint, border: `1px solid ${C.line}`, borderRadius: 11, fontSize: 13, fontWeight: 700, cursor: tasks.length ? 'pointer' : 'default' }}>
+          <Download size={14} /> Excel
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <Counter n={counts.critical} label="критично" color={PRIO.critical.color} bg={PRIO.critical.bg} />
+        <Counter n={counts.important} label="важно" color={PRIO.important.color} bg={PRIO.important.bg} />
+        <Counter n={counts.info} label="информация" color={PRIO.info.color} bg={PRIO.info.bg} />
+        <Counter n={counts.overdue} label="просрочено" color="#dc2626" bg="#fee2e2" />
+      </div>
+
+      {err && <div style={{ background: '#fde8e8', color: '#c2360b', padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13 }}>{err}</div>}
+
+      <div className="fbar" style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <select className="fchip" value={flt.priority} onChange={(e) => setFlt((f) => ({ ...f, priority: e.target.value }))} style={selectStyle}>
+          <option value="all">Все приоритеты</option>
+          <option value="critical">Критично</option>
+          <option value="important">Важно</option>
+          <option value="info">Информация</option>
+        </select>
+        <select className="fchip" value={flt.status} onChange={(e) => setFlt((f) => ({ ...f, status: e.target.value }))} style={selectStyle}>
+          <option value="active">Активные</option>
+          <option value="all">Все статусы</option>
+          <option value="new">Новая</option>
+          <option value="assigned">Назначена</option>
+          <option value="in_progress">В работе</option>
+          <option value="resolved">Исправлена</option>
+          <option value="verified">Проверена</option>
+          <option value="rejected">Отклонена</option>
+        </select>
+        <select className="fchip" value={flt.category} onChange={(e) => setFlt((f) => ({ ...f, category: e.target.value }))} style={selectStyle}>
+          <option value="all">Все категории</option>
+          {Object.entries(CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select className="fchip" value={flt.office} onChange={(e) => setFlt((f) => ({ ...f, office: e.target.value }))} style={selectStyle}>
+          <option value="all">Все офисы</option>
+          {offices.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <div className="search-box" style={{ flex: 1, minWidth: 180 }}>
+          <input value={flt.q} onChange={(e) => setFlt((f) => ({ ...f, q: e.target.value }))} placeholder="Поиск по описанию…"
+            style={{ width: '100%', padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13 }} />
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
+      ) : !filtered.length ? (
+        <Empty icon={ListChecks} title="Проблем не найдено" text="По текущим фильтрам задач нет. Нажмите «Проверить сейчас», чтобы обновить данные." />
+      ) : (
+        <DataTable columns={columns} rows={filtered} pageSize={25} onRowClick={(r) => setDetail(r)} initialSort={{ key: 'priority', dir: 'asc' }} />
+      )}
+
+      {detail && (
+        <TaskDetail task={detail} dict={dict} onClose={() => setDetail(null)} onSave={saveTask} onOpenStudent={onOpenStudent} />
+      )}
+    </div>
+  )
+}
+
+function TaskDetail({ task, dict, onClose, onSave, onOpenStudent }) {
+  const [status, setStatus] = useState(task.status)
+  const [due, setDue] = useState(task.due_date || '')
+  const [comment, setComment] = useState(task.comment_admin || '')
+  const p = PRIO[task.priority] || PRIO.info
+
+  const save = async () => {
+    await onSave(task.id, { status, due_date: due || null, comment_admin: comment })
+    onClose()
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 50 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 460, padding: 24, maxHeight: '92vh', overflow: 'auto' }}>
+        <div className="rowflex" style={{ marginBottom: 14, gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, padding: '3px 9px', borderRadius: 20, color: p.color, background: p.bg }}>{p.label}</span>
+          <button onClick={onClose} style={{ marginLeft: 'auto', color: C.slate, border: 'none', background: 'none', cursor: 'pointer' }}><X size={20} /></button>
+        </div>
+        <h3 style={{ margin: '0 0 8px', fontSize: 16.5, fontWeight: 800 }}>{task.title}</h3>
+        {task.description && <p style={{ margin: '0 0 14px', fontSize: 13, color: C.slate }}>{task.description}</p>}
+        {task.action_required && (
+          <div style={{ background: C.brandSoft, color: C.brand, padding: '9px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700, marginBottom: 14 }}>
+            {task.action_required}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, fontSize: 13, color: C.slate }}>
+          <div>Ответственный: <b style={{ color: '#1b1f3b' }}>{responsibleName(task, dict)}</b></div>
+          {task.office && <div>Офис: <b style={{ color: '#1b1f3b' }}>{task.office}</b></div>}
+          {task.detected_at && <div>Обнаружено: <b style={{ color: '#1b1f3b' }}>{fmtDate(task.detected_at.slice(0, 10))}</b></div>}
+        </div>
+
+        {task.student_id && onOpenStudent && (
+          <button onClick={() => { onClose(); onOpenStudent(task.student_id) }} className="rowflex"
+            style={{ gap: 6, padding: '9px 14px', background: '#fff', color: C.brand, border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginBottom: 14 }}>
+            <ExternalLink size={14} /> Открыть карточку ученика
+          </button>
+        )}
+
+        <Field label="Статус">
+          <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ ...selectStyle, width: '100%' }}>
+            {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Срок исправления">
+          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13 }} />
+        </Field>
+        <Field label="Комментарий завуча">
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3}
+            style={{ width: '100%', padding: '9px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }} />
+        </Field>
+
+        <button onClick={save} className="rowflex" style={{ gap: 7, width: '100%', justifyContent: 'center', padding: '11px 16px', background: C.brand, color: '#fff', borderRadius: 11, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', marginTop: 6 }}>
+          <Check size={16} /> Сохранить
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.slate, marginBottom: 5 }}>{label}</div>
+      {children}
+    </div>
+  )
+}
+
+// ---------- Отчёт для WhatsApp ----------
+function copyReport(tasks, dict) {
+  const active = tasks.filter((t) => ACTIVE_STATUSES.includes(t.status))
+  const text = buildReportText(active, dict)
+  navigator.clipboard?.writeText(text).then(
+    () => alert('Отчёт скопирован — можно вставить в WhatsApp.'),
+    () => alert('Не удалось скопировать. Текст отчёта:\n\n' + text),
+  )
+}
+
+function buildReportText(active, dict) {
+  const dateStr = new Date().toLocaleDateString('ru-RU')
+  const lines = [`📋 Контроль «Лидер+» — ${dateStr}`, '']
+  lines.push(`Всего задач: ${active.length} (критично: ${active.filter((t) => t.priority === 'critical').length}, важно: ${active.filter((t) => t.priority === 'important').length}, информация: ${active.filter((t) => t.priority === 'info').length})`, '')
+
+  const byResp = {}
+  active.forEach((t) => { (byResp[responsibleName(t, dict)] ||= []).push(t) })
+  Object.entries(byResp).sort((a, b) => b[1].length - a[1].length).forEach(([name, items]) => {
+    lines.push(`👤 ${name} (${items.length}):`)
+    items.forEach((t) => {
+      const mark = t.priority === 'critical' ? '🔴' : t.priority === 'important' ? '🟡' : '🔵'
+      lines.push(`  ${mark} ${t.title}${t.action_required ? ' — ' + t.action_required : ''}`)
+    })
+    lines.push('')
+  })
+  return lines.join('\n').trim()
+}
+
+// ---------- Excel-экспорт ----------
+function exportExcel(tasks, dict) {
+  const wb = XLSX.utils.book_new()
+  const rowOf = (t) => ({
+    Приоритет: (PRIO[t.priority] || {}).label || t.priority,
+    Категория: CATEGORY_LABEL[t.category] || t.category,
+    Проблема: t.title,
+    Описание: t.description || '',
+    'Что нужно сделать': t.action_required || '',
+    Ответственный: responsibleName(t, dict),
+    Офис: t.office || '',
+    Срок: t.due_date || '',
+    Статус: (STATUS[t.status] || {}).label || t.status,
+    Обнаружено: t.detected_at ? t.detected_at.slice(0, 10) : '',
+    Исправлено: t.resolved_at ? t.resolved_at.slice(0, 10) : '',
+  })
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tasks.map(rowOf)), 'Все проблемы')
+
+  const byResp = {}
+  tasks.forEach((t) => { (byResp[responsibleName(t, dict)] ||= []).push(t) })
+  const byRespRows = Object.entries(byResp).flatMap(([name, items]) => items.map((t) => ({ Сотрудник: name, ...rowOf(t) })))
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(byRespRows), 'По сотрудникам')
+
+  const byRole = {}
+  tasks.forEach((t) => { (byRole[ROLE_LABEL[t.responsible_role] || t.responsible_role || '—'] ||= []).push(t) })
+  const byRoleRows = Object.entries(byRole).flatMap(([role, items]) => items.map((t) => ({ Роль: role, ...rowOf(t) })))
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(byRoleRows), 'По ролям')
+
+  const byOffice = {}
+  tasks.forEach((t) => { (byOffice[t.office || '—'] ||= []).push(t) })
+  const byOfficeRows = Object.entries(byOffice).flatMap(([office, items]) => items.map((t) => ({ Офис: office, ...rowOf(t) })))
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(byOfficeRows), 'По офисам')
+
+  const fixed = tasks.filter((t) => t.status === 'resolved' || t.status === 'verified')
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fixed.map(rowOf)), 'Исправленные')
+
+  XLSX.writeFile(wb, `Контроль_${todayStr()}.xlsx`)
 }
 
 // ---------- ПЛАНЫ УРОКОВ ----------

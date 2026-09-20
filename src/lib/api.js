@@ -675,6 +675,30 @@ export async function fetchNotifications() {
   return data || []
 }
 
+// ---------- ЕЖЕДНЕВНЫЙ КОНТРОЛЬ (control_tasks) ----------
+// Запускает все проверки заново (UPSERT по dedup_key, авто-закрытие исчезнувших проблем).
+export async function runControlChecks() {
+  const { data, error } = await supabase.rpc('run_control_checks')
+  if (error) throw error
+  return Array.isArray(data) ? data[0] : data
+}
+export async function fetchControlTasks() {
+  const { data, error } = await supabase.from('control_tasks')
+    .select('*').order('priority', { ascending: true }).order('due_date', { ascending: true }).limit(5000)
+  if (error) throw error
+  return data || []
+}
+export async function updateControlTask(id, patch) {
+  const { error } = await supabase.rpc('update_control_task', {
+    p_id: id,
+    p_status: patch.status ?? null,
+    p_responsible_user_id: patch.responsible_user_id ?? null,
+    p_due_date: patch.due_date ?? null,
+    p_comment_admin: patch.comment_admin ?? null,
+  })
+  if (error) throw error
+}
+
 // ---------- ЖУРНАЛ ОБЩЕНИЯ ----------
 export async function fetchCommunications(studentId) {
   const { data, error } = await supabase.from('communications')
