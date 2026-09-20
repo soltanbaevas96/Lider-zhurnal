@@ -6,6 +6,7 @@ import { C, monthOptions, currentMonth, periodRange, periodLabelOf } from './lib
 import { Spinner } from './components/ui'
 import Login from './pages/Login'
 import TeacherCabinet from './pages/TeacherCabinet'
+import TeacherGroupsTab from './pages/TeacherGroupsTab'
 import AdminCabinet from './pages/AdminCabinet'
 import OfficeManagerCabinet from './pages/OfficeManagerCabinet'
 import MethodistCabinet from './pages/MethodistCabinet'
@@ -260,12 +261,15 @@ export default function App() {
           <PayrollTimesheets isAdmin={isAdmin} isDirector={isDirector} isAccountant={isAccountant} dict={dict} onOpenStudent={(id) => setOpenStudent(id)} />
         ) : teacher ? (
           <>
-            <div style={{ display: 'flex', gap: 7, marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 7, marginBottom: 16, flexWrap: 'wrap' }}>
               {[
                 { k: 'mylessons', t: 'Мои занятия' },
                 { k: 'journal', t: 'Журнал' },
+                { k: 'manage', t: 'Управление' },
+                { k: 'schedule', t: 'Расписание' },
               ].map((o) => {
-                const on = (view === o.k) || (o.k === 'mylessons' && view !== 'journal')
+                const teacherViews = ['journal', 'manage', 'schedule']
+                const on = view === o.k || (o.k === 'mylessons' && !teacherViews.includes(view))
                 return (
                   <button key={o.k} onClick={() => setView(o.k)}
                     style={{
@@ -279,6 +283,10 @@ export default function App() {
             {view === 'journal' ? (
               <TeacherCabinet teacher={teacher} dict={dict} lessons={lessons} period={period} setPeriod={setPeriod}
                 onLessonAdded={onLessonAdded} onLessonChanged={onLessonChanged} onLessonDeleted={onLessonDeleted} />
+            ) : view === 'manage' ? (
+              <TeacherGroupsTab teacher={teacher} dict={dict} />
+            ) : view === 'schedule' ? (
+              <Schedule dict={dict} isAdmin={false} canEdit={false} readOnly onFullBleed={setScheduleFullBleed} />
             ) : (
               <MyLessons teacherId={teacher.id} onChanged={reloadLessons} dict={dict} />
             )}

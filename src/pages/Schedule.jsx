@@ -110,8 +110,18 @@ function conflictLabel(info) {
 // с isAdmin, но методист получает canEdit=true, isAdmin=false (свой офис,
 // без массовых инструментов). lockedOffice — если задан, офис не
 // выбирается, а зафиксирован (кабинет методиста — только его офис).
-export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullBleed }) {
-  const canEditSlots = canEdit ?? isAdmin
+// readOnly — чистый просмотр без единой возможности редактирования
+// (кабинет преподавателя, ТЗ «Управление группами и общее расписание»):
+// клик по занятию открывает информационную карточку вместо формы
+// редактирования, кнопки создания/импорта/синхронизации не показываются
+// независимо от isAdmin/canEdit — просмотр той же самой сетки, которую
+// правят завуч/методист, но без единого элемента управления. Защита не
+// только визуальная: save_schedule_slot/sync_all_schedules и так
+// проверяют права на backend (is_admin()/is_methodist()), readOnly
+// здесь только убирает элементы интерфейса, которые всё равно ни к
+// чему не приведут для преподавателя.
+export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullBleed, readOnly }) {
+  const canEditSlots = readOnly ? false : (canEdit ?? isAdmin)
 
   // Расписание — единственный экран, которому нужна полная ширина окна.
   useEffect(() => {
@@ -141,6 +151,10 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const [dayOffset, setDayOffset] = useState(0)
 
   const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, start_time, end_time } для нового с предзаполнением
+  const [viewSlot, setViewSlot] = useState(null)   // read-only просмотр занятия (только readOnly-режим)
+  // Единая точка клика по занятию — в readOnly открывает карточку
+  // просмотра, иначе как раньше открывает форму редактирования.
+  const openSlot = (r) => { if (readOnly) setViewSlot(r); else setEditSlot(r) }
   const [confirmDel, setConfirmDel] = useState(null) // id слота на удаление
   const [confirmSync, setConfirmSync] = useState(false)
   const [delImpact, setDelImpact] = useState(null)   // { future_count, conducted_count } для диалога подтверждения (п.27 ТЗ)
@@ -544,13 +558,13 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
       {loading ? (
         <div style={{ padding: 50, textAlign: 'center', color: C.slate }}>Загрузка…</div>
       ) : mode === 'groups' ? (
-        <GroupsMode slots={visibleSlots} onOpen={(s) => setEditSlot(s)} />
+        <GroupsMode slots={visibleSlots} onOpen={openSlot} />
       ) : mode === 'teachers' ? (
-        <TeachersMode slots={visibleSlots} dict={dict} onOpen={(s) => setEditSlot(s)} />
+        <TeachersMode slots={visibleSlots} dict={dict} onOpen={openSlot} />
       ) : mode === 'list' ? (
         <ScheduleList
           slots={visibleSlots} weekStart={weekStart} gradeOfSlot={gradeOfSlot} conflictMap={conflictMap}
-          onOpenSlot={(r) => setEditSlot(r)}
+          onOpenSlot={openSlot}
           canEditSlots={canEditSlots && !teacherActive}
           onAdd={() => setEditSlot('new')}
           emptyMessage={teacherActive ? `У ${selectedTeacherName || 'преподавателя'} нет занятий на эту неделю.` : undefined}
@@ -565,7 +579,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
           canEditSlots={canEditSlots && !teacherActive}
           gradeOfSlot={gradeOfSlot}
           conflictMap={conflictMap}
-          onOpenSlot={(r) => setEditSlot(r)}
+          onOpenSlot={openSlot}
           onCreateAt={(weekday, time) => setEditSlot({
             weekday, start_time: time, end_time: fromMin(toMin(time) + 80),
           })}
@@ -573,7 +587,11 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         />
       )}
 
-      {editSlot && (
+      {viewSlot && (
+        <SlotDetailView slot={viewSlot} dict={dict} onClose={() => setViewSlot(null)} />
+      )}
+
+      {editSlot && !readOnly && (
         <SlotModal slot={editSlot} dict={dict} roomOptions={roomOptions} pageOffice={office} lockedOffice={lockedOffice}
           canTransferOffice={isAdmin}
           onClose={() => setEditSlot(null)}
@@ -804,7 +822,7 @@ function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, can
                   const leftPct = r._lane * widthPct
                   return (
                     <LessonCard key={r.id} r={r} grade={gradeOfSlot(r)} conflict={conflictMap.get(r.id)}
-                      onClick={() => onOpenSlot(r)}
+                      onClick={() => onOpenSlot({ ...r, _occurrenceDate: dateStr })}
                       style={{ position: 'absolute', top, height, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, boxSizing: 'border-box' }} />
                   )
                 })}
@@ -814,7 +832,7 @@ function ScheduleGrid({ slots, weekStart, dayCount, dayOffset, setDayOffset, can
                   const widthPct = 100 / ov.lanes
                   const leftPct = ov.lane * widthPct
                   return (
-                    <div key={i2} onClick={(e) => { e.stopPropagation(); setOverflowOpen(ov.items) }}
+                    <div key={i2} onClick={(e) => { e.stopPropagation(); setOverflowOpen(ov.items.map((it) => ({ ...it, _occurrenceDate: dateStr }))) }}
                       style={{
                         position: 'absolute', top, height, left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, boxSizing: 'border-box',
                         background: C.grey, border: `1.5px dashed ${C.faint}`, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -932,7 +950,7 @@ function ScheduleList({ slots, weekStart, gradeOfSlot, conflictMap, onOpenSlot, 
                   const hasConflict = !!(conflict && (conflict.room || conflict.group || conflict.teacher || conflict.assistant))
                   const label = conflictLabel(conflict)
                   return (
-                    <div key={r.id} onClick={() => onOpenSlot(r)} className="rowflex"
+                    <div key={r.id} onClick={() => onOpenSlot({ ...r, _occurrenceDate: dateStr })} className="rowflex"
                       style={{ gap: 14, padding: '10px 14px', background: m.bg, border: `1.5px solid ${hasConflict ? '#dc2626' : m.border}`, borderRadius: 11, cursor: 'pointer', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 13, fontWeight: 800, color: m.color, minWidth: 100 }}>{fmtHM(r.start_time)}–{fmtHM(r.end_time)}</span>
                       {isReal ? (
@@ -1066,6 +1084,55 @@ function addSheet(wb, name, rows) {
 }
 const navBtn = { width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.line}`, background: '#fff', color: C.slate, cursor: 'pointer', display: 'grid', placeItems: 'center' }
 const selSty = { padding: '8px 10px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 12.5, outline: 'none', background: '#fff' }
+
+// ================= ПРОСМОТР ЗАНЯТИЯ (read-only) =================
+// Информационная карточка для readOnly-режима (кабинет преподавателя) —
+// та же самая карточка расписания, что видит завуч/методист, но без
+// единого поля ввода и без кнопки сохранения/удаления (п.21 ТЗ
+// «Управление группами и общее расписание в кабинете преподавателя»).
+// _occurrenceDate (если передана вызывающей сеткой/списком) показывает
+// конкретную календарную дату этого клика, а не только день недели —
+// schedule сам по себе хранит повторяющееся правило (weekday), а не
+// одну дату, поэтому дата берётся из контекста клика в сетке недели.
+function SlotDetailView({ slot, dict, onClose }) {
+  const grade = (dict.groups || []).find((g) => g.id === slot.group_id)?.grade
+  const wdLabel = WD.find((w) => w.n === slot.weekday)?.t || ''
+  const dateLabel = slot._occurrenceDate ? `${fmtDate(slot._occurrenceDate)} · ${wdLabel}` : wdLabel
+  const m = STATUS_META[slot.status] || STATUS_META.confirmed
+  const isReal = isRealStatus(slot.status)
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,58,.5)', display: 'grid', placeItems: 'center', padding: 16, zIndex: 70 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 18, width: '100%', maxWidth: 420, padding: 24 }}>
+        <div className="rowflex" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Занятие</h3>
+          <button onClick={onClose} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: C.slate, cursor: 'pointer' }}><X size={20} /></button>
+        </div>
+        <DetailRow label="Дата" value={dateLabel} />
+        <DetailRow label="Время" value={`${fmtHM(slot.start_time)}–${fmtHM(slot.end_time)}`} />
+        <DetailRow label="Офис" value={slot.office} />
+        <DetailRow label="Кабинет" value={slot.room} />
+        {isReal ? (
+          <>
+            <DetailRow label="Группа" value={slot.group_name + (grade ? ` (${grade} кл)` : '')} />
+            <DetailRow label="Предмет" value={(slot.subject_name || '').split(' / ')[0] || '—'} />
+            <DetailRow label="Преподаватель" value={slot.teacher_name || '—'} />
+            {slot.assistant_name && <DetailRow label="Ассистент" value={slot.assistant_name} />}
+          </>
+        ) : (
+          <DetailRow label="Статус" value={m.label} />
+        )}
+      </div>
+    </div>
+  )
+}
+function DetailRow({ label, value }) {
+  return (
+    <div className="rowflex" style={{ gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.line}` }}>
+      <span style={{ fontSize: 12.5, color: C.slate }}>{label}</span>
+      <span style={{ marginLeft: 'auto', fontSize: 13.5, fontWeight: 700, color: C.ink, textAlign: 'right' }}>{value}</span>
+    </div>
+  )
+}
 
 // ================= СОЗДАНИЕ / РЕДАКТИРОВАНИЕ СЛОТА =================
 // Офис ЗАФИКСИРОВАН контекстом страницы (pageOffice/lockedOffice) — его
