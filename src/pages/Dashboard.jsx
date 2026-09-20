@@ -104,7 +104,10 @@ export default function Dashboard({ onOpenRisks, onOpenSection, onOpenAnalytics 
         <>
           {noLessons && <Banner type="warn">За выбранный период занятий нет. Показатели ниже — нулевые; они появятся, когда преподаватели начнут проводить занятия.</Banner>}
           {/* ---------- ГЛАВНАЯ ПОЛОСА ---------- */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 12, marginBottom: 12 }}>
+          {/* minmax(150px,...) — не 215px (было): на 375px экране 215px
+              не даёт 2 колонки (2*215=430 > доступной ширины), карточки
+              шли по одной в ряд вместо требуемых 2 на mobile. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 12 }}>
             <HeroCard
               value={`${k.attendance_pct}%`}
               label="Средняя посещаемость"

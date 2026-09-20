@@ -29,9 +29,18 @@ export default function DataTable({ columns, rows, onRowClick, pageSize = 25, in
     setSort((s) => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' })
   }
 
+  // На мобильном (≤640px) та же самая строка данных рендерится не как
+  // строка таблицы, а как карточка (первая колонка — заголовок карточки,
+  // остальные — пары «подпись: значение») — единая правка здесь чинит
+  // это сразу для ВСЕХ таблиц приложения (Риски/Контроль/Аналитика/
+  // База учеников/группы и т.д. — все они используют этот компонент),
+  // без переделки каждой страницы по отдельности. Обе разметки рендерятся
+  // всегда, видимость переключает только CSS-media-запрос (.dt-table-view/
+  // .dt-card-view в App.jsx) — без слушателя resize и лишнего состояния.
+  const [firstCol, ...restCols] = columns
   return (
     <div className="dt-wrap">
-      <div className="dt-scroll">
+      <div className="dt-scroll dt-table-view">
         <table className="dt">
           <thead>
             <tr>
@@ -63,6 +72,24 @@ export default function DataTable({ columns, rows, onRowClick, pageSize = 25, in
           </tbody>
         </table>
       </div>
+
+      <div className="dt-card-view">
+        {pageRows.map((r, i) => (
+          <div key={r.id ?? i} className="dt-card" onClick={onRowClick ? () => onRowClick(r) : undefined}>
+            {firstCol && (
+              <div className="dt-card-title">{firstCol.render ? firstCol.render(r) : r[firstCol.key]}</div>
+            )}
+            {restCols.map((c) => (
+              <div key={c.key} className="dt-card-row">
+                {c.label ? <span className="dt-card-label">{c.label}</span> : null}
+                <span className="dt-card-value">{c.render ? c.render(r) : r[c.key]}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+        {pageRows.length === 0 && <div className="dt-card-empty">Ничего не найдено</div>}
+      </div>
+
       {pages > 1 && (
         <div className="pager">
           <button disabled={page === 0} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={15} /></button>

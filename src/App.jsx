@@ -138,6 +138,54 @@ export default function App() {
         .pager button.on{background:#4338ca;border-color:#4338ca;color:#fff;}
         .pager button:disabled{opacity:.4;cursor:default;}
         .av{border-radius:8px;color:#fff;display:grid;place-items:center;font-weight:700;flex-shrink:0;}
+
+        /* ---------- MOBILE-FIRST АДАПТИВ ----------
+           Единые брейкпоинты для всего приложения: mobile ≤640px,
+           tablet 640-1024px, desktop >1024px. Меняются только через
+           media-запросы ниже — компоненты не подключают свой отдельный
+           набор точек останова. */
+
+        /* Таблицы (DataTable.jsx) — на мобильном строка становится
+           карточкой вместо горизонтально обрезаемой строки; обе
+           разметки в DOM всегда, видимость переключает только CSS. */
+        .dt-card-view{display:none;flex-direction:column;gap:9px;padding:10px;}
+        .dt-card{background:#fff;border:1px solid #e8e9f3;border-radius:12px;padding:12px 14px;cursor:pointer;}
+        .dt-card-title{font-size:14px;font-weight:700;color:#14183a;margin-bottom:6px;}
+        .dt-card-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 0;font-size:13px;flex-wrap:wrap;}
+        .dt-card-row:not(:last-child){border-bottom:1px solid #f5f5fa;}
+        .dt-card-label{color:#6b7194;font-weight:600;flex-shrink:0;}
+        .dt-card-value{text-align:right;font-weight:600;color:#14183a;min-width:0;}
+        .dt-card-empty{text-align:center;padding:30px;color:#9aa0c0;font-size:13px;}
+        @media(max-width:640px){
+          .dt-table-view{display:none;}
+          .dt-card-view{display:flex;}
+        }
+
+        /* Фильтр-бар (кабинеты/офисы/поиск и т.п.) — уже собирается из
+           flex+gap+flexWrap по всему приложению; на мобильном элементам
+           даём занять всю ширину строки вместо сжатия до нечитаемого. */
+        @media(max-width:640px){
+          .fbar > *{flex:1 1 auto;min-width:140px;}
+        }
+
+        /* Минимальная область нажатия на мобильном — только для
+           фильтр-чипов и пагинации (короткий текст, легко промахнуться),
+           НЕ для всех button/select подряд: в приложении много намеренно
+           компактных 30-32px иконок-кнопок (стрелки навигации и т.п.) —
+           бланкетный min-height на всех button/select задавил бы их
+           inline-стили (min-height всегда побеждает меньший height) и
+           мог сломать плотные ряды, которые нельзя проверить визуально
+           в этой сессии (нет доступа к живому кабинету — только код).
+           Точечный список — самое безопасное, что можно сделать не видя
+           результат вживую. */
+        @media(max-width:640px){
+          .fchip, .pager button{min-height:40px;}
+        }
+
+        /* Убираем горизонтальный скролл страницы целиком — допускаем
+           его только внутри намеренно скроллируемых зон (сетка
+           расписания .dt-scroll и т.п., у которых overflow задан явно). */
+        html, body{overflow-x:hidden;}
       `}</style>
 
       <header style={{ background: C.card, borderBottom: `1px solid ${C.line}`, position: 'sticky', top: 0, zIndex: 20 }}>

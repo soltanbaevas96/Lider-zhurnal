@@ -155,7 +155,9 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, lockedT
   const [refDate, setRefDate] = useState(() => todayStr())
   // Адаптивный показ дней — на узком экране/ноутбуке не нужно насильно
   // втискивать все 7 дней, если из-за этого текст перестаёт читаться.
-  const [dayCount, setDayCount] = useState(7)
+  // На телефоне (mobile-first ТЗ) по умолчанию — один день, а не неделя;
+  // на планшете/десктопе — как раньше, полная неделя.
+  const [dayCount, setDayCount] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 7))
   const [dayOffset, setDayOffset] = useState(0)
 
   const [editSlot, setEditSlot] = useState(null)   // объект слота | 'new' | { weekday, start_time, end_time } для нового с предзаполнением

@@ -106,7 +106,7 @@ export default function TeacherCabinet({ teacher, dict, lessons, period, setPeri
         </div>
       </div>
 
-      <div className="stats" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 28 }}>
+      <div className="stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', marginBottom: 28 }}>
         <Stat icon={Clock} label="Мои уроки" value={myHours} tint={C.brand} bg={C.brandSoft} />
         <Stat icon={CheckCircle2} label="Проведено" value={done.length} tint={C.ok} bg={C.okSoft} />
         <Stat icon={FileText} label="Без плана" value={done.filter((l) => !l.plan_path).length} tint={C.warn} bg={C.warnSoft} />
