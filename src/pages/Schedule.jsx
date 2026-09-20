@@ -120,7 +120,15 @@ function conflictLabel(info) {
 // проверяют права на backend (is_admin()/is_methodist()), readOnly
 // здесь только убирает элементы интерфейса, которые всё равно ни к
 // чему не приведут для преподавателя.
-export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullBleed, readOnly }) {
+// lockedTeacherId — режим «моё расписание» для кабинета преподавателя
+// (ТЗ «Доработка кабинета преподавателя»): переиспользует уже готовый
+// механизм «По преподавателям» (baseSlots = занятия этого teacher_id по
+// ВСЕМ офисам, п.9,19 ТЗ — teacher_id = текущий, без AND office=...),
+// но фильтр «Преподаватель» при этом зафиксирован на самом себе — так
+// же, как lockedOffice фиксирует офис методисту: показывается статичной
+// подписью вместо выпадающего списка, преподаватель не может
+// переключиться на просмотр чужого расписания из своего кабинета.
+export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, lockedTeacherId, onFullBleed, readOnly }) {
   const canEditSlots = readOnly ? false : (canEdit ?? isAdmin)
 
   // Расписание — единственный экран, которому нужна полная ширина окна.
@@ -141,7 +149,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
   const [office, setOffice] = useState(() => lockedOffice || getStoredOffice() || OFFICES[0])
   const [room, setRoom] = useState('')
   const [grade, setGrade] = useState('')
-  const [teacherF, setTeacherF] = useState('')
+  const [teacherF, setTeacherF] = useState(lockedTeacherId || '')
   const [groupF, setGroupF] = useState('')
   const [q, setQ] = useState('')
   const [refDate, setRefDate] = useState(() => todayStr())
@@ -379,7 +387,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
           нужен отдельный печатный заголовок с тем же текстом и периодом. */}
       <div className="print-only" style={{ marginBottom: 10 }}>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>
-          {teacherActive ? `Расписание преподавателя: ${selectedTeacherName || '—'}` : `Расписание — ${office}`}
+          {lockedTeacherId ? 'Моё расписание' : teacherActive ? `Расписание преподавателя: ${selectedTeacherName || '—'}` : `Расписание — ${office}`}
         </h1>
         <div style={{ fontSize: 13, color: '#555' }}>{fmtDate(weekStart)} — {fmtDate(weekEnd)}</div>
       </div>
@@ -387,7 +395,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
       <div className="rowflex no-print" style={{ marginBottom: 10, gap: 12, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 130 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
-            {teacherActive ? `Расписание преподавателя: ${selectedTeacherName || '—'}` : 'Расписание'}
+            {lockedTeacherId ? 'Моё расписание' : teacherActive ? `Расписание преподавателя: ${selectedTeacherName || '—'}` : 'Расписание'}
           </h1>
         </div>
 
@@ -411,7 +419,7 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         )}
         {teacherActive && (
           <span className="rowflex" style={{ gap: 6, padding: '9px 12px', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: '#3730a3' }}>
-            Показано расписание преподавателя по всем офисам
+            {lockedTeacherId ? 'Показаны все ваши занятия по всем офисам' : 'Показано расписание преподавателя по всем офисам'}
           </span>
         )}
 
@@ -529,10 +537,16 @@ export default function Schedule({ dict, isAdmin, canEdit, lockedOffice, onFullB
         </select>
         {(mode === 'week' || mode === 'list') && (
           <>
-            <select value={teacherF} onChange={(e) => setTeacherF(e.target.value)} style={selSty}>
-              <option value="">Все преподаватели</option>
-              {(dict.teachers || []).map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
-            </select>
+            {lockedTeacherId ? (
+              <span className="rowflex" style={{ gap: 6, padding: '9px 14px', background: C.brandSoft, borderRadius: 10, fontSize: 13, fontWeight: 700, color: C.brand }}>
+                Моё расписание
+              </span>
+            ) : (
+              <select value={teacherF} onChange={(e) => setTeacherF(e.target.value)} style={selSty}>
+                <option value="">Все преподаватели</option>
+                {(dict.teachers || []).map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+              </select>
+            )}
             <select value={groupF} onChange={(e) => setGroupF(e.target.value)} style={selSty}>
               <option value="">Все группы</option>
               {groupFilterOptions.map((g) => <option key={g.id} value={g.id}>{g.name}{teacherActive ? ` (${g.office})` : ''}</option>)}

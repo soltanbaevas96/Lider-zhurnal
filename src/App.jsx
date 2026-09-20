@@ -286,7 +286,7 @@ export default function App() {
             ) : view === 'manage' ? (
               <TeacherGroupsTab dict={dict} />
             ) : view === 'schedule' ? (
-              <Schedule dict={dict} isAdmin={false} canEdit={false} readOnly onFullBleed={setScheduleFullBleed} />
+              <Schedule dict={dict} isAdmin={false} canEdit={false} readOnly lockedTeacherId={teacher.id} onFullBleed={setScheduleFullBleed} />
             ) : (
               <MyLessons teacherId={teacher.id} onChanged={reloadLessons} dict={dict} />
             )}
