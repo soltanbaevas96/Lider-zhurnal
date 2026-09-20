@@ -426,12 +426,23 @@ export async function deleteStudent(id) {
 export async function addStudentToGroup(studentId, groupId) {
   const { error } = await supabase.from('student_groups')
     .insert({ student_id: studentId, group_id: groupId })
-  if (error && !/duplicate/i.test(error.message)) throw error
+  if (error && /duplicate/i.test(error.message)) return
+  if (error && /row-level security/i.test(error.message)) {
+    throw new Error('Недостаточно прав добавить ученика в эту группу')
+  }
+  if (error) throw error
 }
 export async function removeStudentFromGroup(studentId, groupId) {
-  const { error } = await supabase.from('student_groups')
-    .delete().eq('student_id', studentId).eq('group_id', groupId)
+  // .select() — чтобы отличить реальное удаление от тихого запрета RLS
+  // (миграция 76): DELETE, не подходящий ни под одну политику, не
+  // поднимает ошибку сам по себе, просто не находит строк — без этой
+  // проверки такой запрет выглядел бы как «успех», хотя ничего не
+  // произошло (актуально для преподавателя, если он почему-то пытается
+  // убрать ученика из уже не своей группы).
+  const { data, error } = await supabase.from('student_groups')
+    .delete().eq('student_id', studentId).eq('group_id', groupId).select()
   if (error) throw error
+  if (!data || data.length === 0) throw new Error('Не удалось убрать ученика из группы — недостаточно прав или связь уже удалена')
 }
 // Все ученики (для поиска при добавлении в группу)
 export async function fetchAllStudents() {
